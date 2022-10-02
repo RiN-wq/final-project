@@ -1,0 +1,36 @@
+{
+  "result" : true,
+  "statistics" : {
+    "total" : {
+      "sites" : 10,
+      "pages" : 436423,
+      "lemmas" : 5127891,
+      "indexing" : false
+    },
+    "detailed" : [ {
+      "url" : "http://www.site.com",
+      "name" : "Имя сайта",
+      "status" : "INDEXED",
+      "statusTime" : 1601534211000,
+      "error" : "Ошибка индексации: главная страница сайта не доступна",
+      "pages" : 5764,
+      "lemmas" : 321115
+    }, {
+      "url" : "http://www.site2.com",
+      "name" : "Тестирование 2-го сайта",
+      "status" : "FAILED",
+      "statusTime" : 1601534211000,
+      "error" : "Ошибка индексации: сайт не доступен",
+      "pages" : 0,
+      "lemmas" : 0
+    }, {
+      "url" : "http://www.site3.com",
+      "name" : "AudioService",
+      "status" : "INDEXING",
+      "statusTime" : 1601534211000,
+      "error" : "",
+      "pages" : 20,
+      "lemmas" : 10
+    } ]
+  }
+}
