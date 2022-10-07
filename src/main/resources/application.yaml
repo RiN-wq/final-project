@@ -1,8 +1,6 @@
 # example values
 
-index-config:
-# Данная структура в Java превращается в Map<String, String>, где ключ это url
-# а значение name
+indexing-settings:
   sites:
     - url: https://www.lenta.ru
       name: Лента.ру
