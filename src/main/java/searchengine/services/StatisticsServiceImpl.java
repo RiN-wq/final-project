@@ -1,7 +1,6 @@
 package searchengine.services;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
@@ -12,21 +11,22 @@ import searchengine.dto.statistics.TotalStatistics;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 @Service
-@EnableConfigurationProperties(value = SitesList.class)
+@RequiredArgsConstructor
 public class StatisticsServiceImpl implements StatisticsService {
 
-    @Autowired
-    private SitesList sites;
+    private final Random random = new Random();
+    private final SitesList sites;
 
     @Override
     public StatisticsResponse getStatistics() {
-        String[] statuses = {"INDEXED", "FAILED", "INDEXING"};
+        String[] statuses = { "INDEXED", "FAILED", "INDEXING" };
         String[] errors = {
-            "Ошибка индексации: главная страница сайта не доступна",
-            "Ошибка индексации: сайт не доступен",
-            ""
+                "Ошибка индексации: главная страница сайта не доступна",
+                "Ошибка индексации: сайт не доступен",
+                ""
         };
 
         TotalStatistics total = new TotalStatistics();
@@ -40,18 +40,18 @@ public class StatisticsServiceImpl implements StatisticsService {
             DetailedStatisticsItem item = new DetailedStatisticsItem();
             item.setName(site.getName());
             item.setUrl(site.getUrl());
-            int pages = (int) (1000 * Math.random());
-            int lemmas = pages * (int) (1000 * Math.random());
+            int pages = random.nextInt(1_000);
+            int lemmas = pages * random.nextInt(1_000);
             item.setPages(pages);
             item.setLemmas(lemmas);
             item.setStatus(statuses[i % 3]);
             item.setError(errors[i % 3]);
             item.setStatusTime(System.currentTimeMillis() -
-                (long) (10000 * Math.random()));
+                    (random.nextInt(10_000)));
             total.setPages(total.getPages() + pages);
             total.setLemmas(total.getLemmas() + lemmas);
             detailed.add(item);
-        };
+        }
 
         StatisticsResponse response = new StatisticsResponse();
         StatisticsData data = new StatisticsData();
