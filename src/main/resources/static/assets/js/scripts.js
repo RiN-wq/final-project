@@ -1449,7 +1449,7 @@ var API = function(){
             dataType: 'json',
             data: data,
             complete: function(result) {
-                if (result.status===200) {
+                if (result.status >= 200 && result.status <= 500) {
                     cb(result.responseJSON, $this, data);
                 } else {
                     alert('Ошибка ' + result.status);
