@@ -1,10 +1,28 @@
-# example values
+server:
+  port: 8080
+
+spring:
+  datasource:
+    username: root
+    password: RiN26072002
+    url: jdbc:mysql://localhost:3306/search_engine?useSSL=false&requireSSL=false&allowPublicKeyRetrieval=true
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+    hibernate:
+      ddl-auto: create
+    show-sql: false
 
 indexing-settings:
   sites:
-    - url: https://www.lenta.ru
-      name: Лента.ру
-    - url: https://www.skillbox.ru
-      name: Skillbox
-    - url: https://www.playback.ru
-      name: PlayBack.Ru
+    - url: https://radiomv.ru/
+      name: Radio Police Wave
+    - url: https://www.svetlovka.ru
+      name: Central City Youth Library "Svetlovka"
+    - url: http://www.playback.ru/
+      name: PlayBack
+logging:
+  level:
+    root: info
+
