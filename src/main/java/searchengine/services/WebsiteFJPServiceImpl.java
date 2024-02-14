@@ -6,6 +6,7 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import searchengine.dto.indexing.IndexingStop;
 import searchengine.model.PageModel;
 import searchengine.model.SiteModel;
 import searchengine.repositories.PageRepository;
@@ -16,10 +17,9 @@ import java.time.LocalDateTime;
 import java.util.concurrent.RecursiveAction;
 
 //TODO: Multi Insert реализовать
-//TODO: Решить проблему с добавлением дубликатов ключей (это как раз и решит проблему перескакивания id в таблице)
 @Service
-public class WebsiteRecursionServiceImpl extends RecursiveAction
-        implements WebsiteRecursionService{
+public class WebsiteFJPServiceImpl extends RecursiveAction
+        implements WebsiteFJPService {
     private final SiteRepository siteRepository;
     private final PageRepository pageRepository;
     private final SiteModel siteModel;
@@ -27,85 +27,97 @@ public class WebsiteRecursionServiceImpl extends RecursiveAction
 
     String regexFiles = "^.*\\.(jpg|JPG|gif|GIF|doc|DOC|pdf|PDF)$";
     String regexWebsite;
-    String url;
     String path; // путь страницы
     int statusCode;
 
+
+    private final LemmaService lemmaService;
+    private final IndexingStop indexingStop;
+
+
     @Autowired
-    public WebsiteRecursionServiceImpl(SiteRepository siteRepository,
-                                       PageRepository pageRepository,
-                                       SiteModel siteModel,
-                                       PageModel pageModel){
+    public WebsiteFJPServiceImpl(SiteRepository siteRepository,
+                                 PageRepository pageRepository,
+                                 SiteModel siteModel,
+                                 PageModel pageModel,
+                                 LemmaService lemmaService,
+                                 IndexingStop indexingStop){
         this.pageModel = pageModel;
         this.siteRepository = siteRepository;
         this.siteModel = siteModel;
         this.pageRepository = pageRepository;
+        this.lemmaService = lemmaService;
+        this.indexingStop = indexingStop;
+        regexWebsite = siteModel.getUrl() + "[^#]*";
     }
     @Override
     public void compute(){
 
-        url = pageModel.getPath();
-
-        regexWebsite = siteModel.getUrl() + "[^#]*";
+        if (indexingStop.isStopIndexingFlag()){
+            Thread.currentThread().interrupt();
+        }
 
         Document webPage = null;
-        Connection.Response response;
 
         pageModel.setSiteModel(siteModel);
 
         try {
-            try {
-                Thread.sleep(150);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
 
-            response = Jsoup.connect(url)
+            Thread.sleep(150);
+
+            Connection.Response response = Jsoup.connect(pageModel.getPath())
                     .userAgent("Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:25.0) Gecko/20100101 Firefox/25.0")
                     .referrer("http://www.google.com").timeout(10000).ignoreHttpErrors(true).execute();
 
             webPage = response.parse();
 
             statusCode = response.statusCode();
+
+            if (statusCode != 200){
+                throw new IOException();
+            }
+
             pageModel.setCode(statusCode);
-            pageModel.setContent(statusCode == 404 ? "" : webPage.toString());
-            pageRepository.save(pageModel);
+            pageModel.setContent(webPage.toString());
+
+
+            //TODO: ВОТ ТЕПЕРЬ СИНХРОНИЗИРОВАННО И ДУБЛИКАТОВ НЕМА!
+            synchronized (pageRepository){
+                // если уже добавлена страница
+                if (pageRepository.findByPath(pageModel.getPath()) != null){
+                    return;
+                }
+                pageRepository.save(pageModel);
+            }
 
             siteModel.setStatusTime(LocalDateTime.now());
-
-            if(statusCode == 503 && siteModel.getUrl().equals(pageModel.getPath())){
-                siteModel.setLastError("Сервер не может обработать страницу в данный момент");
-                siteRepository.save(siteModel);
-                return;
-            }
             siteRepository.save(siteModel);
 
 
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             if (siteModel.getUrl().equals(pageModel.getPath())){
                 siteModel.setLastError("Сайт не существует");
                 siteModel.setStatusTime(LocalDateTime.now());
                 siteRepository.save(siteModel);
                 return;
             }
-            //415 ошибка - некорректный тип данных
-            pageModel.setCode(415);
-            pageModel.setContent("");
-            pageRepository.save(pageModel);
-            return;
-        }
 
-        if (statusCode == 404){
             return;
         }
+        lemmaService.addToLemmaAndIndexTables(webPage.toString(), siteModel, pageModel);
 
         Elements links = webPage.select("a");
 
+
         for (Element link : links) {
+
+            if (indexingStop.isStopIndexingFlag()){
+                Thread.currentThread().interrupt();
+            }
+
             path = link.absUrl("href");
 
-            if (pageRepository.findByPath(path) != null ||
-                    !(path.matches(regexWebsite)) ||
+            if (!(path.matches(regexWebsite)) ||
                     (path.matches(regexFiles))) {
                 continue;
             }
@@ -113,8 +125,8 @@ public class WebsiteRecursionServiceImpl extends RecursiveAction
             pageModel = new PageModel();
             pageModel.setPath(path);
 
-            WebsiteRecursionServiceImpl recursiveWebsiteMap =
-                    new WebsiteRecursionServiceImpl(siteRepository, pageRepository, siteModel, pageModel); // рекурсивный вызов класса
+            WebsiteFJPServiceImpl recursiveWebsiteMap =
+                    new WebsiteFJPServiceImpl(siteRepository, pageRepository, siteModel, pageModel, lemmaService, indexingStop); // рекурсивный вызов класса
 
             recursiveWebsiteMap.fork(); // отправление задачи в очередь ПОТОКА (НО НЕ ЗАПУСК ВЫПОЛНЕНИЯ)
         }
