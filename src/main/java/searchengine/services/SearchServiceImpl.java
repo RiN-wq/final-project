@@ -1,12 +1,15 @@
 package searchengine.services;
 
-import org.apache.lucene.morphology.LuceneMorphology;
-import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.springframework.stereotype.Service;
+import searchengine.dto.responses.SimpleResponse;
+import searchengine.dto.searching.SearchData;
 import searchengine.dto.searching.SearchParameters;
-import searchengine.dto.searching.SearchResponse;
-import searchengine.model.IndexModel;
-import searchengine.model.PageModel;
+import searchengine.dto.responses.SearchResponse;
+import searchengine.exceptions.EmptyRequestException;
+import searchengine.exceptions.NoSearchResultException;
+import searchengine.models.IndexModel;
+import searchengine.models.PageModel;
+import searchengine.models.SiteModel;
 import searchengine.repositories.IndexRepository;
 import searchengine.repositories.SiteRepository;
 
@@ -17,158 +20,183 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
-public class SearchServiceImpl implements SearchService{
-
+public class SearchServiceImpl implements SearchService {
+    private final int MAX_PAGE_FREQUENCY = 300;
     private final IndexRepository indexRepository;
     private final SiteRepository siteRepository;
     private final LemmaService lemmaService;
-    private final IndexingService indexingService;
+    private final SimpleResponse simpleResponse;
     private SearchResponse searchResponse;
+    private SearchData searchData;
 
     public SearchServiceImpl(IndexRepository indexRepository,
                              SiteRepository siteRepository,
                              LemmaService lemmaService,
-                             IndexingService indexingService){
+                             SimpleResponse simpleResponse,
+                             SearchResponse searchResponse,
+                             SearchData searchData) {
         this.indexRepository = indexRepository;
         this.siteRepository = siteRepository;
-
         this.lemmaService = lemmaService;
-        this.indexingService = indexingService;
+        this.searchResponse = searchResponse;
+        this.simpleResponse = simpleResponse;
+        this.searchData = searchData;
+    }
+
+    public SimpleResponse getSimpleErrorResponse(String errorText) {
+
+        simpleResponse.setResult(false);
+        simpleResponse.setError(errorText);
+
+        return simpleResponse;
 
     }
 
-    public List<SearchResponse> getResponse(SearchParameters searchParameters){
+    public SearchResponse getSearchResponse(SearchParameters searchParameters) throws
+            EmptyRequestException, NoSearchResultException {
 
-        List<SearchResponse> searchResponseList = new ArrayList<>();
-        List<PageModel> pageModelList;
-
-        try {
-            pageModelList = searchParameters.getSite() != null ?
-                            getRelevantPagesByRequest(searchParameters.getQuery(), searchParameters.getSite()) :
-                            getRelevantPagesByRequest(searchParameters.getQuery());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        if (searchParameters.getQuery().isBlank()) {
+            throw new EmptyRequestException("Ошибка пустого запроса");
         }
 
-        if (pageModelList.isEmpty()){
-            return new ArrayList<>();
+        Map<PageModel, Float> relevancePageModelMap = getRelativeRelevancePageModelMap(searchParameters);
+
+        searchResponse = new SearchResponse();
+
+        searchResponse.setResult(true);
+        searchResponse.setCount(relevancePageModelMap.size());
+
+        List<SearchData> searchDataList = new ArrayList<>();
+
+        for (PageModel pageModel : relevancePageModelMap.keySet()) {
+            searchDataList.add(getSearchResponseData(pageModel, searchParameters, relevancePageModelMap.get(pageModel)));
         }
 
-        Map<PageModel, Float> pagesRelativelyRelevanceMap
-                = calculatePageRelevance(pageModelList);
+        searchResponse.setData(searchDataList);
 
-        pageModelList = pageModelList.stream()
-                .sorted((pageOne, pageTwo) -> Float.compare(pagesRelativelyRelevanceMap.get(pageOne),
-                        pagesRelativelyRelevanceMap.get(pageTwo)))
-                .limit(searchParameters.getLimit()).collect(Collectors.toList());
-
-        Collections.reverse(pageModelList);
-
-        for (PageModel pageModel : pageModelList){
-
-            searchResponse = new SearchResponse();
-
-            searchResponse.setUrl(pageModel.getPath());
-            searchResponse.setTitle(getPageTitle(pageModel));
-            //searchResponse.setSnippet(getPageSnippet(pageModel, ));
-            searchResponse.setRelevance(pagesRelativelyRelevanceMap.getOrDefault(pageModel, (float) 0));
-
-            searchResponseList.add(searchResponse);
-
-        }
-
-        return searchResponseList;
+        return searchResponse;
     }
 
-    public List<PageModel> getRelevantPagesByRequest(String searchQuery, String siteUrl) throws IOException{
-        //TODO: ЗДЕСЬ ВЕЗДЕ СДЕЛАТЬ ПРОВЕРКИ НА NULL, ЧТОБЫ НЕ БЫЛО EXCEPTION, А СЕЙЧАС Я ЗАНЯТ ДРУГИМ!!!!!!!
+    public Map<PageModel, Float> getRelativeRelevancePageModelMap(SearchParameters searchParameters)
+            throws NoSearchResultException {
 
-        //TODO: Реазиловать  метод получения сниппета
+        List<PageModel> pageModelList =
+                getRelevantPagesByRequest(searchParameters.getQuery(), searchParameters.getSite());
 
-        //TODO: Получение Limit настроил, осталось доделать offset (разобраться как с этим работать)
-        List<PageModel> baseListOfPages = null;
-        List<PageModel> currentListOfPages;
+        final Map<PageModel, Float> pagesRelativelyRelevanceMap = calculateTheRelativePagesRelevance(pageModelList);
 
-        List<String> lemmasList;
+        List<PageModel> sortedRelativelyRelevanceList = new ArrayList<>(pagesRelativelyRelevanceMap.keySet().stream()
+                .sorted((pageOne, pageTwo) ->
+                        Float.compare(pagesRelativelyRelevanceMap.get(pageOne), pagesRelativelyRelevanceMap.get(pageTwo)))
+                .toList());
 
-        lemmasList = makeSortedByFrequencyLemmaList(searchQuery);
+        Collections.reverse(sortedRelativelyRelevanceList);
 
-        // сюда вставляю лемму с минимальным значением страниц
-        baseListOfPages = lemmaService
-                .findAllPagesByLemma(lemmasList.get(0));
+        sortedRelativelyRelevanceList = sortedRelativelyRelevanceList.stream()
+                .skip(searchParameters.getOffset())
+                .limit(searchParameters.getLimit())
+                .toList();
 
-        if (baseListOfPages == null){
-            return new ArrayList<>();
+        Map<PageModel, Float> sortedPagesRelativelyRelevanceMap = new LinkedHashMap<>();
+
+        for (PageModel page : sortedRelativelyRelevanceList) {
+            sortedPagesRelativelyRelevanceMap.put(page, pagesRelativelyRelevanceMap.get(page));
+        }
+
+        return sortedPagesRelativelyRelevanceMap;
+    }
+
+    public List<PageModel> getRelevantPagesByRequest(String searchQuery, String siteUrl) throws NoSearchResultException {
+
+        List<String> lemmasList = makeSortedByFrequencyLemmasList(searchQuery);
+
+        List<PageModel> baseListOfPages = lemmaService.findAllPagesByLemma(lemmasList.get(0));
+
+        if (baseListOfPages == null) {
+            throw new NoSearchResultException("Ошибка пустого ответа");
         }
 
         for (String lemma : lemmasList) {
 
-            currentListOfPages = lemmaService.findAllPagesByLemma(lemma);
+            baseListOfPages = getUpdatedBaseListOfPages(siteUrl, lemma, baseListOfPages);
 
-            if (siteUrl != null){
-
-                currentListOfPages = currentListOfPages.stream()
-                        .filter(pageModel -> pageModel.getSiteModel().equals(siteRepository.findByUrl(siteUrl)))
-                        .collect(Collectors.toList());
-
-            }
-
-            baseListOfPages = baseListOfPages.stream()
-                    .filter(currentListOfPages::contains).collect(Collectors.toList());
-
-            if (baseListOfPages.isEmpty()){
-                return new ArrayList<>();
-            }
         }
         return baseListOfPages;
     }
 
-    public List<String> makeSortedByFrequencyLemmaList(String searchQuery){
+    public List<PageModel> getUpdatedBaseListOfPages(String siteUrl,
+                                                     String lemma,
+                                                     List<PageModel> baseListOfPages) throws NoSearchResultException {
+
+        final List<PageModel> currentListOfPages;
+
+        if (siteUrl != null) {
+            currentListOfPages = lemmaService.findAllPagesByLemma(lemma).stream()
+                    .filter(pageModel -> pageModel.getSiteModel().equals(siteRepository.findByUrl(siteUrl)))
+                    .collect(Collectors.toList());
+        } else {
+            currentListOfPages = lemmaService.findAllPagesByLemma(lemma);
+        }
+
+        baseListOfPages = baseListOfPages.stream()
+                .filter(currentListOfPages::contains).collect(Collectors.toList());
+
+        if (baseListOfPages.isEmpty()) {
+            throw new NoSearchResultException("Ошибка пустого ответа");
+        }
+
+        return baseListOfPages;
+    }
+
+
+    public List<String> makeSortedByFrequencyLemmasList(String searchQuery) {
 
         try {
             return lemmaService.makeLemmasMap(searchQuery).keySet().stream()
-                    .filter(lemma -> {
-                        return (lemmaService.getFrequency(lemma) > 0)
-                                && (lemmaService.getFrequency(lemma) < 300);
-                    })
-                    .sorted((keyOne,keyTwo) -> Integer.compare
+                    .filter(lemma -> (lemmaService.getFrequency(lemma) > 0)
+                            && (lemmaService.getFrequency(lemma) < MAX_PAGE_FREQUENCY))
+                    .sorted((keyOne, keyTwo) -> Integer.compare
                             (lemmaService.getFrequency(keyOne), lemmaService.getFrequency(keyTwo))).toList();
-
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public List<PageModel> getRelevantPagesByRequest(String searchQuery) throws IOException{
 
-        return getRelevantPagesByRequest(searchQuery, null);
-
-    }
-
-    public Map<PageModel, Float> calculatePageRelevance(List<PageModel> pageModelList){
-
-        float maxAbsolutelyRelevance;
+    public Map<PageModel, Float> calculateTheRelativePagesRelevance(List<PageModel> pageModelList) {
 
         Map<PageModel, Float> pagesAbsolutelyRelevanceMap;
 
-        // предлагаю сначала с помощью stream в map загнать: PageModel - значение абсолютной релеватности,
-        // далее этот map пропустить опять же через stream, найти максимальное значение абсолютной релевантности
-        // и вернуть другой map: PageModel - относительная релевантность
-
         pagesAbsolutelyRelevanceMap = pageModelList.stream()
-                .collect(Collectors.toMap(pageModel -> pageModel, pageModel -> {
-                            return indexRepository.findAllByPageModel(pageModel)
-                                    .stream().map(IndexModel::getRank)
-                                    .reduce(Float::sum).get();
-                        }));
+                .collect(Collectors.toMap(pageModel -> pageModel,
+                        pageModel -> indexRepository.findAllByPageModel(pageModel)
+                                .stream().map(IndexModel::getRank)
+                                .reduce(Float::sum).orElseThrow()));
 
-        maxAbsolutelyRelevance = pagesAbsolutelyRelevanceMap.values()
-                .stream().max(Float::compare).get();
+        float maxAbsolutelyRelevance = pagesAbsolutelyRelevanceMap.values()
+                .stream().max(Float::compare).orElseThrow();
 
         return pagesAbsolutelyRelevanceMap.entrySet().stream()
-                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue()/maxAbsolutelyRelevance));
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue() / maxAbsolutelyRelevance));
     }
 
+    public SearchData getSearchResponseData(PageModel pageModel,
+                                            SearchParameters searchParameters,
+                                            float relativeRelevance) {
+
+        searchData = new SearchData();
+        SiteModel siteModel = pageModel.getSiteModel();
+
+        searchData.setSite(siteModel.getUrl());
+        searchData.setSiteName(siteModel.getName());
+        searchData.setUri(pageModel.getPath());
+        searchData.setTitle(getPageTitle(pageModel));
+        searchData.setSnippet(getPageSnippet(pageModel, searchParameters.getQuery()));
+        searchData.setRelevance(relativeRelevance);
+
+        return searchData;
+
+    }
 
     public String getPageTitle(PageModel pageModel) {
 
@@ -179,42 +207,13 @@ public class SearchServiceImpl implements SearchService{
             return matcher.group(1);
         }
         return "error";
+
     }
 
-    public String getPageSnippet(PageModel pageModel, String searchQuery){
+    public String getPageSnippet(PageModel pageModel, String searchQuery) {
 
-        List<String> queryWordsList = makeSortedByFrequencyLemmaList(searchQuery);
-        String htmlText = lemmaService.clearTags(pageModel.getContent())
-                .replace("\n","").toLowerCase();
-        Map<String, Integer> sentencesMap = new LinkedHashMap<>();
-        Pattern pattern;
-        Matcher matcher;
-
-        // сначала проверяем все слова и составляем на каждое слово предложение
-        // допустим будем выводить всего 3 предложения (типо это 3 строки)
-        // сначала находим все предложения, далее проверяем, а вдруг предложения совпадают
-        // мол 2 слова из запроса в 1ом предложении,в этом случае присваиваем предложению
-        // 2 балла, и далее, сначала выводим по количеству баллов, а затем, если баллы совпадают,
-        // то выводим уже по frequency предложения
-
-        for (String word : queryWordsList) {
-
-            pattern = Pattern.compile("\\.(.*?" + word + ".*?)\\.");
-            matcher = pattern.matcher(word);
-
-            while (matcher.find())
-            {
-               sentencesMap.put(matcher.group(1), 1);
-            }
-
-        }
-
-
-
-        /*String regex = "([А-Яа-я0-9_]\s+){3}" + lemma + "([А-Яа-я0-9_]\s+){3}";
-
-        return htmlText.replaceAll("^" + "(" + regex + ")", "");*/
 
         return "";
     }
+
 }

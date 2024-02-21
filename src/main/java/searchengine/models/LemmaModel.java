@@ -1,7 +1,6 @@
-package searchengine.model;
+package searchengine.models;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -11,27 +10,19 @@ import org.springframework.stereotype.Component;
 @Setter
 @NoArgsConstructor
 @Entity
-@Table(name = "page", indexes = {
-        @Index(columnList = "path", name = "path_index", unique = true)
+@Table(name = "lemma", indexes = {
+        @Index(columnList = "lemma", name = "lemma_index", unique = true)
 })
 @Component
-public class PageModel {
+public class LemmaModel {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
-
-    @ManyToOne(cascade = CascadeType.MERGE/*, fetch = FetchType.LAZY*/)
+    @ManyToOne(cascade = CascadeType.MERGE, fetch = FetchType.LAZY)
     @JoinColumn(name = "site_id", nullable = false)
     private SiteModel siteModel;
-
     @Column(columnDefinition = "VARCHAR(255) NOT NULL")
-    private String path;
-
+    private String lemma;
     @Column(columnDefinition = "INT NOT NULL")
-    private int code;
-
-    @Column(columnDefinition = "MEDIUMTEXT NOT NULL")
-    private String content;
+    private int frequency;
 }
-
-

@@ -1,24 +1,39 @@
 package searchengine.services;
 
 import searchengine.config.Site;
-import searchengine.model.SiteModel;
-import searchengine.model.Status;
+import searchengine.dto.responses.SimpleResponse;
+import searchengine.exceptions.InvalidInputException;
+import searchengine.models.*;
 
 import java.util.List;
 
 public interface IndexingService {
-    public List<String> indexAllSites();
-    public List<String> indexPage(String path);
-    public String checkSiteByPage(String path);
-    public boolean startIndexing(List<Site> sitesList);
-    public void clearSiteAndPageTables(List<Site> sites);
-    public List<String> stopIndexing();
-    public List<String> getResponse(boolean errorCheckerFlag, String error);
-    public SiteModel createOrUpdateSite(String url, String name, Status status);
+    List<SimpleResponse> indexAllSites() throws InterruptedException;
+
+    boolean isIndexingGoingOnNow();
+
+    void startIndexing(List<Site> sitesList, List<SimpleResponse> response) throws InterruptedException;
+
+    List<SimpleResponse> indexPage(String path);
+
+    String getCorrectPathForm(String path) throws InvalidInputException;
+
+    SiteModel findOrCreateSiteByPagePath(String path) throws InvalidInputException;
+
+    List<SimpleResponse> stopIndexing();
+
+    List<SimpleResponse> getResponse(boolean errorCheckerFlag,
+                                     String error);
+
     boolean getIndexingStatus();
+
     int getPagesCountOfSite(Site site);
+
     int getLemmasCountOfSite(Site site);
+
     String getSiteStatus(Site site);
+
     long getSiteStatusTime(Site site);
-    public String getSiteError(Site site);
+
+    String getSiteError(Site site);
 }

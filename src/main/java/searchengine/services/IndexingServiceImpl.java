@@ -1,41 +1,34 @@
 package searchengine.services;
-import org.jsoup.Connection;
-import org.jsoup.Jsoup;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
 import searchengine.dto.indexing.IndexingStop;
-import searchengine.model.*;
-import searchengine.repositories.IndexRepository;
+import searchengine.dto.responses.SimpleResponse;
+import searchengine.exceptions.*;
+import searchengine.models.*;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
 import searchengine.repositories.SiteRepository;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.ForkJoinPool;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
-public class IndexingServiceImpl implements IndexingService{
+public class IndexingServiceImpl implements IndexingService {
     private final SiteRepository siteRepository;
     private final PageRepository pageRepository;
     private final LemmaRepository lemmaRepository;
-    private final IndexRepository indexRepository;
-    private SiteModel siteModel;
-    private SiteModel siteWithIndexingPage;
-    private final PageModel pageModel;
-    private LemmaModel lemmaModel;
-    private IndexModel indexModel;
     private final SitesList sitesList;
-    ArrayList<String> response;
     ForkJoinPool forkJoinPool;
-    boolean siteIndexProcessFlag;
-    boolean pageIndexProcessFlag;
-    int statusCode;
-    private final WebsiteFJPServiceImpl websiteRecursionServiceImpl;
+    boolean indexingFlag;
+    private final ModelProcessingService modelProcessingService;
+    private final SimpleResponse simpleResponse;
     private final LemmaService lemmaService;
     private final IndexingStop indexingStop;
 
@@ -43,535 +36,225 @@ public class IndexingServiceImpl implements IndexingService{
     public IndexingServiceImpl(SiteRepository siteRepository,
                                PageRepository pageRepository,
                                LemmaRepository lemmaRepository,
-                               IndexRepository indexRepository,
-                               SiteModel siteModel,
-                               PageModel pageModel,
-                               LemmaModel lemmaModel,
-                               IndexModel indexModel,
-                               WebsiteFJPServiceImpl websiteRecursionServiceImpl,
                                SitesList sitesList,
+                               ModelProcessingService modelProcessingService,
+                               SimpleResponse simpleResponse,
                                LemmaService lemmaService,
                                IndexingStop indexingStop) {
         this.siteRepository = siteRepository;
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
-        this.indexRepository = indexRepository;
-        this.siteModel = siteModel;
-        this.pageModel = pageModel;
-        this.lemmaModel = lemmaModel;
-        this.indexModel = indexModel;
-        this.websiteRecursionServiceImpl = websiteRecursionServiceImpl;
         this.sitesList = sitesList;
+        this.modelProcessingService = modelProcessingService;
+        this.simpleResponse = simpleResponse;
         this.lemmaService = lemmaService;
         this.indexingStop = indexingStop;
     }
 
     @Override
-    public List<String> indexAllSites() {
+    public List<SimpleResponse> indexAllSites() {
 
-        // если вдруг выполняется какая-либо индексация
-        if (siteIndexProcessFlag || pageIndexProcessFlag) {
-            return getResponse(true, "Индексация уже запущена");
+        if (isIndexingGoingOnNow()) {
+            return getResponse(false, "Индексация уже запущена");
         }
-
-        siteIndexProcessFlag = true;
-        indexingStop.setStopIndexingFlag(false);
 
         List<Site> sites = sitesList.getSites();
 
-        response = new ArrayList<>();
         forkJoinPool = new ForkJoinPool();
+        List<SimpleResponse> response = new ArrayList<>();
 
         for (Site site : sites) {
-            clearTables(siteRepository.findByUrl(site.getUrl()));
+            modelProcessingService.clearTables(siteRepository.findByUrl(site.getUrl()));
         }
 
-        while (!startIndexing(sites)){
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
+        try {
+            startIndexing(sites, response);
+        } catch (InterruptedException e) {
+            System.err.println(e.toString());
         }
 
-        if (!forkJoinPool.isShutdown()){
-            forkJoinPool.shutdownNow();
-        }
-
-        siteIndexProcessFlag = false;
+        indexingFlag = false;
         return response;
     }
 
+    public boolean isIndexingGoingOnNow() {
 
-    public boolean startIndexing(List<Site> sitesList){
+        if (indexingFlag) {
+            return true;
+        }
+
+        indexingFlag = true;
+        indexingStop.setStopIndexingFlag(false);
+
+        return false;
+
+    }
+
+
+    public void startIndexing(List<Site> sitesList,
+                              List<SimpleResponse> response) throws InterruptedException {
         for (Site siteIterator : sitesList) {
+            SiteModel siteModel = new SiteModel();
 
-            String url = siteIterator.getUrl();
-            String name = siteIterator.getName();
-
-            siteModel = new SiteModel();
-
-            if (indexingStop.isStopIndexingFlag()){
-                siteModel = createOrUpdateSite(url, name, Status.FAILED);
-                siteRepository.save(siteModel);
-
+            if (indexingStop.isStopIndexingFlag()) {
+                modelProcessingService.createOrUpdateSiteModel(siteIterator, Status.FAILED, siteModel);
                 response.addAll(getResponse(indexingStop.isStopIndexingFlag(), siteModel.getLastError()));
                 continue;
             }
 
-            siteModel = createOrUpdateSite(url, name, Status.INDEXING);
-            siteRepository.save(siteModel);
+            siteModel = modelProcessingService.createOrUpdateSiteModel(siteIterator, Status.INDEXING, siteModel);
 
-            pageModel.setPath(url);
+            forkJoinPool.invoke(new WebsiteFJPServiceImpl(siteRepository, pageRepository, siteModel,
+                    modelProcessingService.setPathToPageModel(siteIterator.getUrl()),
+                    lemmaService, indexingStop, modelProcessingService));
 
-            forkJoinPool.invoke(new WebsiteFJPServiceImpl(siteRepository,
-                    pageRepository, siteModel, pageModel, lemmaService, indexingStop));
-
-            while (!forkJoinPool.isQuiescent()){
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+            while (!forkJoinPool.isQuiescent()) {
+                Thread.sleep(1000);
             }
 
-            siteModel = (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
-                    createOrUpdateSite(url, name, Status.FAILED) : createOrUpdateSite(url, name, Status.INDEXED);
-            siteRepository.save(siteModel);
+            modelProcessingService.createOrUpdateSiteModel(siteIterator,
+                    (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
+                            Status.FAILED : Status.INDEXED, siteModel);
 
             response.addAll(getResponse(indexingStop.isStopIndexingFlag(), siteModel.getLastError()));
         }
-        return true;
     }
 
-    @Override
-    public void clearSiteAndPageTables(List<Site> sites) {
 
-    }
+    public List<SimpleResponse> indexPage(String path) {
+        if (isIndexingGoingOnNow()) {
+            return getResponse(false, "Индексация уже запущена");
+        }
+        SiteModel siteModel;
+        PageModel pageModel = null;
 
-    public List<String> indexPage(String path) {
-        //TODO: Нормализовать получение ссылки через PostMan (т.е. через формат JSON)
-        if (pageIndexProcessFlag || siteIndexProcessFlag){
-            return getResponse(true, "Индексация уже запущена!");
+        try {
+            path = getCorrectPathForm(path);
+            siteModel = findOrCreateSiteByPagePath(path);
+        } catch (InvalidInputException e) {
+            indexingFlag = false;
+            return getResponse(false, e.toString());
         }
 
-        indexingStop.setStopIndexingFlag(false);
+        modelProcessingService.clearTables(pageRepository.findByPath(path));
 
-        pageIndexProcessFlag = true;
+        try {
+            pageModel = modelProcessingService.createOrUpdatePageModel(siteModel, path);
+            lemmaService.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
+        } catch (IOException | DuplicateException |
+                 RedirectionException | ClientException | ServerException | RuntimeException e) {
+            modelProcessingService.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
+            indexingFlag = false;
+            return getResponse(false, modelProcessingService.getPageModelExceptionMessage(e));
+        }
 
-        path = path.replace("url=","")
-                .replace("%2F","/")
+        indexingFlag = false;
+        return getResponse(true, "");
+    }
+
+
+    public String getCorrectPathForm(String path) throws InvalidInputException {
+
+        path = path.replace("url=", "")
+                .replace("%2F", "/")
                 .replace("%3A", ":");
 
-        PageModel pageForIndexing = new PageModel();
+        Pattern urlPattern = Pattern.compile("((http|https)://(www.)?[a-z0-9-_]+\\.[^.\" \n\t]+)");
+        Matcher matcher = urlPattern.matcher(path.toLowerCase());
 
-        String url = checkSiteByPage(path);
-
-        if (url != null){
-
-            clearTables(pageModel);
-
-            int statusCode = 400;
-            String[] informationFromConnection;
-
-            String content;
-
-            pageForIndexing.setSiteModel(siteRepository.findByUrl(url));
-
-            pageForIndexing.setPath(path);
-
-            try {
-
-                informationFromConnection = getConnection(path);
-
-                statusCode = Integer.parseInt(informationFromConnection[0]);
-                content = informationFromConnection[1];
-
-                if (statusCode != 200){
-                    throw new IOException();
-                }
-
-            } catch (IOException e) {
-                pageForIndexing.setCode(statusCode);
-                pageForIndexing.setContent("");
-
-                pageRepository.save(pageModel);
-
-                pageIndexProcessFlag = false;
-
-                return (statusCode == 400 ? getResponse(true, "Указанная страница не существует") :
-                        getResponse(true, "Не получилось подключиться"));
-            }
-
-            pageForIndexing.setCode(statusCode);
-            pageForIndexing.setContent(content);
-
-            pageRepository.save(pageForIndexing);
-
-            lemmaService.addToLemmaAndIndexTables(content, siteWithIndexingPage, pageForIndexing);
-
-            pageIndexProcessFlag = false;
-
-            return getResponse(false, "");
+        while (matcher.find()) {
+            return matcher.group(1);
         }
 
-        pageIndexProcessFlag = false;
+        throw new InvalidInputException("Ошибка ввода");
 
-        return getResponse(true, "Данная страница находится за пределами сайтов,\n" +
-                    "указанных в конфигурационном файле");
     }
 
-    public String checkSiteByPage(String path){
-        siteWithIndexingPage = new SiteModel();
+    public SiteModel findOrCreateSiteByPagePath(String path) throws InvalidInputException {
+
+        SiteModel siteModel = new SiteModel();
 
         List<Site> sites = sitesList.getSites();
 
-        for (Site site : sites) {
-            String url = site.getUrl().strip();
-            String regex = url + "[^#]*";
+        List<Site> matchingSite = sites.stream()
+                .filter(site -> path.matches(site.getUrl().strip() + "[^#]*")).toList();
 
-            if (path.matches(regex)){
-                if (siteRepository.findByUrl(url) == null){
-                    siteWithIndexingPage.setStatusTime(LocalDateTime.now());
-                    siteWithIndexingPage.setName(url);
-                    siteWithIndexingPage.setUrl(url);
-                    siteWithIndexingPage.setStatus(Status.INDEXING);
-                }
-                else {
-                    siteWithIndexingPage = siteRepository.findByUrl(url);
-                }
-                siteRepository.save(siteWithIndexingPage);
-
-                return url;
-            }
-        }
-        return null;
-    }
-
-/*    public void clearSiteAndPageTables(List<Site> sites){
-        for (Site siteIterator : sites) {
-            if (indexingStop.isStopIndexingFlag()){
-                break;
-            }
-
-
-            String url = siteIterator.getUrl();
-
-            if (siteRepository.findByUrl(url) != null) {
-
-                siteModel = siteRepository.findByUrl(url);
-
-                pageRepository.deleteAllInBatch(pageRepository.findAllBySiteModel(siteModel));
-                    siteRepository.delete(siteModel);
-
-            }
-        }
-    }*/
-
-    public void sendListByBuffer(List<LemmaModel> lemmasForProcessing,
-                                 List<IndexModel> indexesForProcessing,
-                                 boolean deletingFlag){
-
-        int bufferSize = 400;
-
-        if (lemmasForProcessing.isEmpty()){
-            return;
+        if (matchingSite.size() != 1) {
+            throw new InvalidInputException("Количество подходящий сайтов из файла конфигурации не равно 1");
         }
 
-        if (lemmasForProcessing.size() < bufferSize){
-            bufferSize = lemmasForProcessing.size();
-        }
+        String url = matchingSite.get(0).getUrl();
 
-        while (lemmasForProcessing != null){
+        siteModel = modelProcessingService.createOrUpdateSiteModel(matchingSite.get(0), Status.INDEXING,
+                siteRepository.findByUrl(url) == null ? siteModel : siteRepository.findByUrl(url));
 
-            indexRepository.deleteAllInBatch(indexesForProcessing.subList(0, bufferSize - 1));
-
-            //TODO: ПЕРЕД СЛЕД. ИЗМЕНЕНИЯМИ ЗАЛИТЬ ПРОЕКТ НА GITHUB (надоело искать ошибки днями)
-            if (deletingFlag) {
-                lemmaRepository.deleteAllInBatch(lemmasForProcessing.subList(0, bufferSize - 1));
-            }
-            else {
-                lemmaRepository.saveAll(lemmasForProcessing.subList(0, bufferSize - 1));
-            }
-
-            lemmasForProcessing = lemmasForProcessing.size() > bufferSize ?
-                    lemmasForProcessing.subList(bufferSize, lemmasForProcessing.size() - 1) :
-                    null;
-        }
-
-    }
-
-    public void processIndex(List<IndexModel> indexModelList){
-
-
-        /*Map<LemmaModel, IndexModel> lemmasForDeleting;
-        Map<LemmaModel, IndexModel> lemmasForUpdating;*/
-
-        LinkedList<LemmaModel> lemmasForDeleting = new LinkedList<>();
-        LinkedList<LemmaModel> lemmasForUpdating = new LinkedList<>();
-        LinkedList<IndexModel> indexesOfDeletingLemmas = new LinkedList<>();
-        LinkedList<IndexModel> indexesOfUpdatingLemmas = new LinkedList<>();
-
-
-        for(IndexModel indexModel : indexModelList){
-            LemmaModel modelOfLemma = indexModel.getLemmaModel();
-
-            if (indexModel.getLemmaModel().getFrequency() == 1){
-                lemmasForDeleting.add(modelOfLemma);
-                indexesOfDeletingLemmas.add(indexModel);
-            }else {
-                modelOfLemma.setFrequency(modelOfLemma.getFrequency() - 1);
-                lemmasForUpdating.add(modelOfLemma);
-                indexesOfUpdatingLemmas.add(indexModel);
-            }
-
-        }
-
-  /*      lemmasForDeleting = indexModelList.stream()
-                .filter(indexModel -> indexModel.getLemmaModel().getFrequency() == 1)
-                .collect(Collectors.toMap(IndexModel::getLemmaModel, indexModel -> indexModel));
-
-
-        lemmasForUpdating = indexModelList.stream()
-                .map(IndexModel::getLemmaModel)
-                .filter(lemmaModel -> lemmaModel.getFrequency() > 1)
-                .peek(lemmaModel -> lemmaModel.setFrequency(lemmaModel.getFrequency() - 1))
-                .collect(Collectors.toMap(lemmaModel -> lemmaModel, null));*/
-
-        //indexRepository.deleteAllInBatch(indexModelList);
-
-        sendListByBuffer(lemmasForDeleting, indexesOfDeletingLemmas, true);
-        sendListByBuffer(lemmasForUpdating, indexesOfUpdatingLemmas, false);
-
-/*        for(IndexModel indexModel : indexModelList){
-            СДЕЛАТЬ 2 СТРИМА ПОЛУЧЕНИЯ LEMMASFOR DELETING И ... И ПОТОМ СНАЧАЛА УДАЛИТЬ ВСЕ ИНДЕКСЫ
-                    СВЯЗАННЫЕ С ТЕКУЩЕЙ СТРАНИЦЕЙ А ЗАТЕМ ОБРАБОТАТЬ ПОЛУЧЕННЫЕ 2 ЛИСТА (ПО БУФЕРАМ), ВСЁ КРУТО ПОЛУЧИТСЯ
-                    И ДАЖЕ НЕ ПОНАДОБИТСЯ ДЕЛАТЬ ВЛОЖЕННЫЕ ЦИКЛЫ
-
-
-
-            if (indexModel.getLemmaModel().getFrequency() == 1){
-                lemmasForDeleting.add(indexModel.getLemmaModel());
-            }else {
-                lemmaModel.setFrequency(lemmaModel.getFrequency() - 1);
-                lemmasForUpdating.add(indexModel.getLemmaModel());
-            }
-
-        }
-
-
-        ИНДЕКСЫ МЫ ТОЖЕ ДОЛЖНЫ УДАЛЯТЬ, ДОБАВИТЬ СИСТЕМУ ИХ УДАЛЕНИЯ!!!
-
-        if (lemmasForUpdating.size() == 400 || крайняя итерация для indexModelList){
-            lemmaRepository.deleteAllInBatch(lemmasForDeleting);
-            lemmasForUpdating.clear();
-        } else if (lemmasForDeleting.size() == 400 || крайняя итерация для...) {
-            lemmaRepository.saveAll(lemmasForUpdating);
-            lemmasForDeleting.clear();
-        }*/
-
-    }
-
-   //TODO: Расклад таков: видимо есть дубликаты в таблице indexTable => не могут нормально и адекватно удалиться некоторые Enity
-
-    public void clearTables(SiteModel siteModel){
-
-        // сначала удаляем всё из indexTable путём итерации по pageModelList и запросами deleteAllInBatch
-        // потом находим сайт, к которому привязаны страницы и понижаем частоту в таблице lemmaTable у всех подходящих лемм
-
-        List<PageModel> pageModelList = pageRepository.findAllBySiteModel(siteModel);
-
-        if (pageModelList.isEmpty()) {
-            return;
-        }
-
-
-        for(PageModel pageModel : pageModelList){
-
-            if(indexingStop.isStopIndexingFlag()){
-                return;
-            }
-
-            processIndex(indexRepository.findAllByPageModel(pageModel));
-
-            pageRepository.delete(pageModel);
-        }
-
-        siteRepository.delete(siteModel);
-
-/*
-
-
-
-        //index Table содержит связь страницы и сайта, именно на него нужно давить
-        ПОЛУЧАЮ весь список индексов (получим всё, а далее отсеим ненужное)
-                страницы загоняю в Map, где ключ - страница, а значения - indexModel
-
-
-                ПРОГОНЯЮ ВЕСЬ СПИСОК ИНДЕКСОВ, постепенно заполняя Map со страницам (слишком ресурсозатратно)
-
-                ДАЛЕЕ ДЛЯ КАЖДОЙ СТРАНИЦЫ ПРОГОНЯЮ: СТРАНИЦА - ЛЕММА, Т.Е. УМЕНЬШАЮ ЛЕММУ ИЛИ ВОВСЕ УДАЛЯЮ
-                КОЛИЧЕСТВО СОХРАНЕНИЕ И УДАЛЕНИЙ ПАКЕТОМ ПОЛУЧИТСЯ МЕНЬШЕ, ЧЕМ ПРИ ЕДИНИЧНОМ РАСКЛАДЕ!!!
-            ВСЁ РАВНО ДОБАВИТЬ ПРОВЕРКУ НА ОГРАНИЧЕНИЕ УДАЛЕНИЙ/ДОБАВЛЕНИЙ ПАКЕТОМ В 400 ЕДИНИЦ
-
-        *//*for (PageModel pageModel : pageModelList) {
-            indexRepository.deleteAllInBatch(indexRepository.findAllByPageModel(pageModel));
-        }*//*
-
-        for (LemmaModel lemmaModel : lemmaRepository.findAllBySiteModel(siteModel)) {
-
-            if (indexingStop.isStopIndexingFlag()){
-                lemmaRepository.deleteAllInBatch(lemmasForDeleting);
-                lemmaRepository.saveAll(lemmasForUpdating);
-                break;
-            }
-
-            if (lemmasForUpdating.contains(lemmaModel)){
-                lemmaModel.get
-            }
-
-            // что делаем с леммой
-            if (lemmaModel.getFrequency() == 1){
-                lemmasForDeleting.add(lemmaModel);
-            } else {
-                lemmaModel.setFrequency(lemmaModel.getFrequency() - 1);
-                lemmasForUpdating.add(lemmaModel);
-            }
-
-            // а что если в буфере содержится лемма, которую по факту сейчас опять же уменьшается?
-            // и в итоге получаем, что несоответствие данные, т.е. лемма сохраняется 2 раза с неправильными данными... сука
-
-            // удаление/обновление буфером
-            if (lemmasForUpdating.size() == 400){
-                lemmaRepository.deleteAllInBatch(lemmasForDeleting);
-                lemmasForUpdating.clear();
-            } else if (lemmasForDeleting.size() == 400) {
-                lemmaRepository.saveAll(lemmasForUpdating);
-                lemmasForDeleting.clear();
-            }
-
-
-        }
-
-        lemmaRepository.deleteAllInBatch(lemmasForDeleting);
-        lemmaRepository.saveAll(lemmasForUpdating);*/
-
-    }
-
-    public void clearTables(PageModel pageModel){
-
-        indexRepository.deleteAllInBatch(indexRepository.findAllByPageModel(pageModel));
-        lemmaRepository.deleteAllInBatch(lemmaRepository.findAllBySiteModel(pageModel.getSiteModel()));
-        pageRepository.delete(pageModel);
-
-    }
-
-
-    public List<String> stopIndexing(){
-
-        if (forkJoinPool == null || forkJoinPool.isShutdown()){
-            return getResponse(true, "Индексация ещё не запущена");
-        }
-        indexingStop.setStopIndexingFlag(true);
-
-        forkJoinPool.shutdownNow();
-
-        return getResponse(false,"");
-    }
-
-    public List<String> getResponse(boolean errorCheckerFlag,
-                                    String error){
-
-        List<String> partOfResponse = new ArrayList<>();
-        String result;
-
-        if (errorCheckerFlag){
-            result = "false";
-
-            partOfResponse.add(result);
-            partOfResponse.add(error);
-            return partOfResponse;
-        }
-        result = "true";
-        partOfResponse.add(result);
-        return partOfResponse;
-
-    }
-
-    public SiteModel createOrUpdateSite(String url,
-                                        String name,
-                                        Status status){
-        siteModel.setUrl(url);
-        siteModel.setName(name);
-        siteModel.setStatusTime(LocalDateTime.now());
-        siteModel.setStatus(status);
-
-        if (status.equals(Status.FAILED) && siteModel.getLastError() == null){
-            siteModel.setLastError("Индексация остановлена пользователем");
-        }
         return siteModel;
     }
 
-    public String[] getConnection(String path) throws IOException {
 
-        Connection.Response connection = Jsoup.connect(path)
-                .userAgent("Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:25.0) Gecko/20100101 Firefox/25.0")
-                .referrer("http://www.google.com").timeout(10000).ignoreHttpErrors(true).execute();
+    public List<SimpleResponse> stopIndexing() {
 
-        return new String[]{String.valueOf(connection.statusCode()),
-                connection.parse().toString()};
+        if (forkJoinPool == null || forkJoinPool.isShutdown()) {
+            return getResponse(false, "Индексация ещё не запущена");
+        }
+
+        forkJoinPool.shutdownNow();
+        indexingStop.setStopIndexingFlag(true);
+
+        return getResponse(true, "");
     }
 
+    public List<SimpleResponse> getResponse(boolean result,
+                                            String error) {
 
+        simpleResponse.setResult(result);
+        simpleResponse.setError(error);
 
+        return List.of(simpleResponse);
 
-
-
-
-
-
-
-
-
-
-
-    public boolean getIndexingStatus(){
-        return siteIndexProcessFlag || pageIndexProcessFlag;
     }
 
-    public int getPagesCountOfSite(Site site){
+    public boolean getIndexingStatus() {
+        return indexingFlag;
+    }
+
+    public int getPagesCountOfSite(Site site) {
         return pageRepository.countBySiteModel(siteRepository.findByUrl(site.getUrl()));
     }
 
-    public int getLemmasCountOfSite(Site site){
+    public int getLemmasCountOfSite(Site site) {
         return lemmaRepository.countBySiteModel(siteRepository.findByUrl(site.getUrl()));
     }
 
     public String getSiteStatus(Site site) {
         // Если записи сайта ещё не существует
-        if (siteRepository.findByUrl(site.getUrl()) == null){
+        if (siteRepository.findByUrl(site.getUrl()) == null) {
             return Status.INDEXING.toString();
         }
 
         return siteRepository.findByUrl(site.getUrl()).getStatus().toString();
     }
 
-    public long getSiteStatusTime(Site site){
-        // Если записи сайта ещё не существует
-        if (siteRepository.findByUrl(site.getUrl()) == null){
+    public long getSiteStatusTime(Site site) {
+
+        if (siteRepository.findByUrl(site.getUrl()) == null) {
             return new Date().getTime();
         }
 
         return siteRepository.findByUrl(site.getUrl()).getStatusTime()
                 .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+
     }
 
-    public String getSiteError(Site site){
+    public String getSiteError(Site site) {
+
         if (siteRepository.findByUrl(site.getUrl()) == null ||
-                siteRepository.findByUrl(site.getUrl()).getLastError() == null){
+                siteRepository.findByUrl(site.getUrl()).getLastError() == null) {
             return "";
         }
+
         return siteRepository.findByUrl(site.getUrl()).getLastError();
+
     }
 
 }

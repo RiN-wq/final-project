@@ -1,7 +1,6 @@
-package searchengine.model;
+package searchengine.models;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -11,11 +10,21 @@ import java.time.LocalDateTime;
 
 @Getter
 @Setter
+/*
+@AllArgsConstructor
+*/
 @NoArgsConstructor
 @Entity
 @Table(name = "site")
 @Component
 public class SiteModel {
+    public void siteModel(Status status, LocalDateTime statusTime, String lastError, String url, String name){
+        this.status = status;
+        this.statusTime = statusTime;
+        this.lastError = lastError;
+        this.url = url;
+        this.name = name;
+    }
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;

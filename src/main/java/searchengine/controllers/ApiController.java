@@ -6,6 +6,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import searchengine.dto.searching.SearchParameters;
 import searchengine.dto.statistics.StatisticsResponse;
+import searchengine.exceptions.EmptyRequestException;
+import searchengine.exceptions.NoSearchResultException;
 import searchengine.services.IndexingService;
 import searchengine.services.SearchService;
 import searchengine.services.StatisticsService;
@@ -13,8 +15,6 @@ import searchengine.services.StatisticsService;
 @RestController
 @RequestMapping("/api")
 public class ApiController {
-    //TODO: Наладить систему возврата HTTP статусов (чтобы у всех не было HTTP.OK)
-
     private final StatisticsService statisticsService;
     private final IndexingService indexingService;
     private final SearchService searchService;
@@ -30,31 +30,40 @@ public class ApiController {
 
     @GetMapping(path = "/statistics")
     public ResponseEntity<StatisticsResponse> statistics() {
-        return ResponseEntity.ok(statisticsService.getStatistics());
+        return new ResponseEntity(statisticsService.getStatistics(), HttpStatus.FOUND);
+
     }
 
     @GetMapping(path = "/startIndexing")
-    public ResponseEntity<IndexingService> startIndexing(){
-        System.out.println("ПОЕХАЛИ...!!!!!!!!!!");
-        return new ResponseEntity(indexingService.indexAllSites(), HttpStatus.OK);
+    public ResponseEntity<IndexingService> startIndexing() {
+        try {
+            return new ResponseEntity(indexingService.indexAllSites(), HttpStatus.CREATED);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @GetMapping(path = "/stopIndexing")
-    public ResponseEntity<IndexingService>  stopIndexing(){
-        System.out.println("ПРИЕХАЛИ....");
+    public ResponseEntity<IndexingService> stopIndexing() {
         return new ResponseEntity(indexingService.stopIndexing(), HttpStatus.OK);
     }
 
     @PostMapping(path = "/indexPage")
-    public ResponseEntity<IndexingService> startPageIndexing(@RequestBody String path){
-        System.out.println("ПОЕХАЛИ, НО 1 РАЗИК...!!!!!!!!!!");
-        return new ResponseEntity(indexingService.indexPage(path), HttpStatus.OK);
+    public ResponseEntity<IndexingService> startPageIndexing(@RequestBody String path) {
+        return new ResponseEntity(indexingService.indexPage(path), HttpStatus.CREATED);
     }
 
     @GetMapping(path = "/search")
-    public ResponseEntity<IndexingService>  startSearching(@RequestBody SearchParameters searchParameters){
-        System.out.println("Выводим, получается, список ответов по запросу...");
-        return new ResponseEntity(searchService.getResponse(searchParameters), HttpStatus.OK);
+    public ResponseEntity<IndexingService> startSearching(@RequestBody SearchParameters searchParameters) {
+        try {
+            return new ResponseEntity(searchService.getSearchResponse(searchParameters), HttpStatus.FOUND);
+        } catch (EmptyRequestException e) {
+            return new ResponseEntity(searchService.getSimpleErrorResponse("Задан пустой поисковый запрос"),
+                    HttpStatus.BAD_REQUEST);
+        } catch (NoSearchResultException e) {
+            return new ResponseEntity(searchService.getSimpleErrorResponse("Ничего не найдено"),
+                    HttpStatus.NOT_FOUND);
+        }
     }
 
 }

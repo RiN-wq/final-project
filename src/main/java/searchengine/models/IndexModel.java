@@ -1,4 +1,4 @@
-package searchengine.model;
+package searchengine.models;
 
 import jakarta.persistence.*;
 import lombok.Getter;

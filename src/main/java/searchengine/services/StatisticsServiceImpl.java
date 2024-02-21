@@ -12,13 +12,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Service
-//@RequiredArgsConstructor
 public class StatisticsServiceImpl implements StatisticsService {
 
     private final SitesList sites;
     private final IndexingService indexingService;
 
-    public  StatisticsServiceImpl(SitesList sites, IndexingService indexingService){
+    public StatisticsServiceImpl(SitesList sites, IndexingService indexingService) {
         this.sites = sites;
         this.indexingService = indexingService;
     }
@@ -49,7 +48,7 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     public void addStatisticsSite(Site site,
                                   TotalStatistics total,
-                                  List<DetailedStatisticsItem> detailed){
+                                  List<DetailedStatisticsItem> detailed) {
 
         DetailedStatisticsItem item = new DetailedStatisticsItem();
 
