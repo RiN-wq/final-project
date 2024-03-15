@@ -9,6 +9,6 @@ public class SearchParameters {
     private String query;
     private String site;
     private int offset = 0;
-    private int limit = 20;
+    private int limit = 10;
 
 }

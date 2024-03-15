@@ -8,7 +8,7 @@ import searchengine.models.*;
 import java.util.List;
 
 public interface IndexingService {
-    List<SimpleResponse> indexAllSites() throws InterruptedException;
+    List<SimpleResponse> indexAllSites();
 
     boolean isIndexingGoingOnNow();
 

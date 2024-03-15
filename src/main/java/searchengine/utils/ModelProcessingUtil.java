@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.utils;
 
 import org.jsoup.Connection;
 import org.jsoup.select.Elements;
@@ -13,7 +13,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-public interface ModelProcessingService {
+public interface ModelProcessingUtil {
     SiteModel createOrUpdateSiteModel(Site site, Status status, SiteModel siteModel);
 
     SiteModel setStatusTimeToSiteModel(SiteModel siteModel);

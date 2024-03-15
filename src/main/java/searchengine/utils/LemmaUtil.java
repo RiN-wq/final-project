@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.utils;
 
 import org.apache.lucene.morphology.LuceneMorphology;
 import searchengine.models.PageModel;
@@ -8,8 +8,8 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 
-public interface LemmaService {
-    String[] splitTextIntoWords(String text);
+public interface LemmaUtil {
+    List<String> splitTextIntoWords(String text);
 
     HashMap<String, Integer> makeLemmasMap(String text) throws IOException;
 
@@ -21,8 +21,7 @@ public interface LemmaService {
 
     String removeTheSquareBrackets(String text);
 
-    String clearTags(String html);
-
+    String getAllTextFromHtml(String html);
     void addToLemmaAndIndexTables(String html, SiteModel siteWithIndexingPage, PageModel pageForIndexing);
     int getFrequency(String lemma);
 

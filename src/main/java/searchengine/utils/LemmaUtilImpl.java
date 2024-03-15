@@ -1,6 +1,7 @@
-package searchengine.services;
+package searchengine.utils;
 
 import org.apache.lucene.morphology.LuceneMorphology;
+import org.apache.lucene.morphology.english.EnglishLuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.jsoup.Jsoup;
 import org.jsoup.safety.Safelist;
@@ -19,33 +20,39 @@ import java.util.HashMap;
 import java.util.List;
 
 @Service
-public class LemmaServiceImpl implements LemmaService {
+public class LemmaUtilImpl implements LemmaUtil {
 
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
-    private final ModelProcessingService modelProcessingService;
+    private final ModelProcessingUtil modelProcessingUtil;
 
-    List<String> officialPartsOfSpeech = List.of("МЕЖД", "ПРЕДЛ", "СОЮЗ");
+    List<String> russianOfficialPartsOfSpeech = List.of("МЕЖД", "ПРЕДЛ", "СОЮЗ");
+    List<String> englishOfficialPartsOfSpeech = List.of("CONJ", "PREP", "PART", "INT");
 
     @Autowired
-    public LemmaServiceImpl(LemmaRepository lemmaRepository,
-                            IndexRepository indexRepository,
-                            ModelProcessingService modelProcessingService) {
+    public LemmaUtilImpl(LemmaRepository lemmaRepository,
+                         IndexRepository indexRepository,
+                         ModelProcessingUtil modelProcessingUtil) {
         this.lemmaRepository = lemmaRepository;
         this.indexRepository = indexRepository;
-        this.modelProcessingService = modelProcessingService;
+        this.modelProcessingUtil = modelProcessingUtil;
     }
 
 
-    public String[] splitTextIntoWords(String text) {
-        return text.replaceAll("[^а-яА-Я\\s]", "").split("\\s+");
+    public List<String> splitTextIntoWords(String text) {
+        text = text.replaceAll("[а-яА-Яa-zA-Z0-9._-]+@[а-яА-Яa-zA-Z0-9._-]+","");
+        return List.of(text.replaceAll("[^а-яА-Яa-zA-Z-\\s]", "")
+                .replaceAll("-"," ").toLowerCase().split("\\s+"));
     }
 
     public HashMap<String, Integer> makeLemmasMap(String text) {
 
-        LuceneMorphology luceneMorphology;
+        LuceneMorphology russianLuceneMorphology;
+        LuceneMorphology englishLuceneMorphology;
+
         try {
-            luceneMorphology = new RussianLuceneMorphology();
+            russianLuceneMorphology = new RussianLuceneMorphology();
+            englishLuceneMorphology = new EnglishLuceneMorphology();
         } catch (IOException e) {
             throw new RuntimeException();
         }
@@ -54,8 +61,11 @@ public class LemmaServiceImpl implements LemmaService {
 
         for (String word : splitTextIntoWords(text)) {
 
-            lemmasMap = addLemmaToMap(word, lemmasMap, luceneMorphology);
-
+            if (word.matches("[а-яА-Я]*?")) {
+                lemmasMap = addLemmaToMap(word, lemmasMap, russianLuceneMorphology);
+            } else if (word.matches("[a-zA-Z]*?")){
+                lemmasMap = addLemmaToMap(word, lemmasMap, englishLuceneMorphology);
+            }
         }
         return lemmasMap;
 
@@ -65,12 +75,12 @@ public class LemmaServiceImpl implements LemmaService {
                                                   HashMap<String, Integer> lemmasMap,
                                                   LuceneMorphology luceneMorphology) {
 
-        if (word.isBlank() || isTheWordAnOfficialPartOfSpeech(word.toLowerCase(), luceneMorphology)) {
+        if (word.isBlank() || isTheWordAnOfficialPartOfSpeech(word, luceneMorphology)) {
             return lemmasMap;
         }
 
         String lemma = removeTheSquareBrackets
-                (String.valueOf(luceneMorphology.getNormalForms(word.toLowerCase())));
+                (String.valueOf(luceneMorphology.getNormalForms(word)));
 
         lemmasMap.put(lemma, (lemmasMap.containsKey(lemma) ? lemmasMap.get(lemma) + 1 : 1));
 
@@ -82,7 +92,8 @@ public class LemmaServiceImpl implements LemmaService {
         String partOfTheSpeech = (luceneMorphology.getMorphInfo(removeTheSquareBrackets(word))
                 .toString().split("\\s+")[1]);
 
-        return officialPartsOfSpeech.contains(partOfTheSpeech);
+        return russianOfficialPartsOfSpeech.contains(partOfTheSpeech) ||
+                englishOfficialPartsOfSpeech.contains(partOfTheSpeech);
 
     }
 
@@ -90,24 +101,24 @@ public class LemmaServiceImpl implements LemmaService {
         return text.replace("[", "").replace("]", "");
     }
 
-    public String clearTags(String html) {
-        return Jsoup.clean(html, Safelist.none());
+    public String getAllTextFromHtml(String html) {
+        return Jsoup.clean(html, Safelist.none()).toLowerCase();
     }
 
     public void addToLemmaAndIndexTables(String html,
                                          SiteModel siteModel,
                                          PageModel pageModel) {
-        String htmlText = clearTags(html);
+        String htmlText = getAllTextFromHtml(html);
         HashMap<String, Integer> lemmasMap;
 
         lemmasMap = makeLemmasMap(htmlText);
 
         for (String lemma : lemmasMap.keySet()) {
 
-            LemmaModel lemmaModel = modelProcessingService
+            LemmaModel lemmaModel = modelProcessingUtil
                     .createOrUpdateLemmaModel(siteModel, lemma, new LemmaModel());
 
-            modelProcessingService.saveIndexModel(pageModel, lemmaModel, lemmasMap.get(lemma));
+            modelProcessingUtil.saveIndexModel(pageModel, lemmaModel, lemmasMap.get(lemma));
         }
     }
 

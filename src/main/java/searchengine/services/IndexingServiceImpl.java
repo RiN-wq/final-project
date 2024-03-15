@@ -11,6 +11,9 @@ import searchengine.models.*;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
 import searchengine.repositories.SiteRepository;
+import searchengine.utils.LemmaUtil;
+import searchengine.utils.ModelProcessingUtil;
+import searchengine.utils.WebsiteFJPServiceImpl;
 
 import java.io.IOException;
 import java.time.ZoneId;
@@ -27,9 +30,9 @@ public class IndexingServiceImpl implements IndexingService {
     private final SitesList sitesList;
     ForkJoinPool forkJoinPool;
     boolean indexingFlag;
-    private final ModelProcessingService modelProcessingService;
+    private final ModelProcessingUtil modelProcessingUtil;
     private final SimpleResponse simpleResponse;
-    private final LemmaService lemmaService;
+    private final LemmaUtil lemmaUtil;
     private final IndexingStop indexingStop;
 
     @Autowired
@@ -37,17 +40,17 @@ public class IndexingServiceImpl implements IndexingService {
                                PageRepository pageRepository,
                                LemmaRepository lemmaRepository,
                                SitesList sitesList,
-                               ModelProcessingService modelProcessingService,
+                               ModelProcessingUtil modelProcessingUtil,
                                SimpleResponse simpleResponse,
-                               LemmaService lemmaService,
+                               LemmaUtil lemmaUtil,
                                IndexingStop indexingStop) {
         this.siteRepository = siteRepository;
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
         this.sitesList = sitesList;
-        this.modelProcessingService = modelProcessingService;
+        this.modelProcessingUtil = modelProcessingUtil;
         this.simpleResponse = simpleResponse;
-        this.lemmaService = lemmaService;
+        this.lemmaUtil = lemmaUtil;
         this.indexingStop = indexingStop;
     }
 
@@ -64,7 +67,7 @@ public class IndexingServiceImpl implements IndexingService {
         List<SimpleResponse> response = new ArrayList<>();
 
         for (Site site : sites) {
-            modelProcessingService.clearTables(siteRepository.findByUrl(site.getUrl()));
+            modelProcessingUtil.clearTables(siteRepository.findByUrl(site.getUrl()));
         }
 
         try {
@@ -97,22 +100,22 @@ public class IndexingServiceImpl implements IndexingService {
             SiteModel siteModel = new SiteModel();
 
             if (indexingStop.isStopIndexingFlag()) {
-                modelProcessingService.createOrUpdateSiteModel(siteIterator, Status.FAILED, siteModel);
+                modelProcessingUtil.createOrUpdateSiteModel(siteIterator, Status.FAILED, siteModel);
                 response.addAll(getResponse(indexingStop.isStopIndexingFlag(), siteModel.getLastError()));
                 continue;
             }
 
-            siteModel = modelProcessingService.createOrUpdateSiteModel(siteIterator, Status.INDEXING, siteModel);
+            siteModel = modelProcessingUtil.createOrUpdateSiteModel(siteIterator, Status.INDEXING, siteModel);
 
             forkJoinPool.invoke(new WebsiteFJPServiceImpl(siteRepository, pageRepository, siteModel,
-                    modelProcessingService.setPathToPageModel(siteIterator.getUrl()),
-                    lemmaService, indexingStop, modelProcessingService));
+                    modelProcessingUtil.setPathToPageModel(siteIterator.getUrl()),
+                    lemmaUtil, indexingStop, modelProcessingUtil));
 
             while (!forkJoinPool.isQuiescent()) {
                 Thread.sleep(1000);
             }
 
-            modelProcessingService.createOrUpdateSiteModel(siteIterator,
+            modelProcessingUtil.createOrUpdateSiteModel(siteIterator,
                     (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
                             Status.FAILED : Status.INDEXED, siteModel);
 
@@ -136,16 +139,16 @@ public class IndexingServiceImpl implements IndexingService {
             return getResponse(false, e.toString());
         }
 
-        modelProcessingService.clearTables(pageRepository.findByPath(path));
+        modelProcessingUtil.clearTables(pageRepository.findByPath(path));
 
         try {
-            pageModel = modelProcessingService.createOrUpdatePageModel(siteModel, path);
-            lemmaService.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
+            pageModel = modelProcessingUtil.createOrUpdatePageModel(siteModel, path);
+            lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
         } catch (IOException | DuplicateException |
                  RedirectionException | ClientException | ServerException | RuntimeException e) {
-            modelProcessingService.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
+            modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
             indexingFlag = false;
-            return getResponse(false, modelProcessingService.getPageModelExceptionMessage(e));
+            return getResponse(false, modelProcessingUtil.getPageModelExceptionMessage(e));
         }
 
         indexingFlag = false;
@@ -185,7 +188,8 @@ public class IndexingServiceImpl implements IndexingService {
 
         String url = matchingSite.get(0).getUrl();
 
-        siteModel = modelProcessingService.createOrUpdateSiteModel(matchingSite.get(0), Status.INDEXING,
+        siteModel = modelProcessingUtil.createOrUpdateSiteModel(matchingSite.get(0),
+                siteRepository.findByUrl(url) == null ? Status.INDEXING : siteRepository.findByUrl(url).getStatus(),
                 siteRepository.findByUrl(url) == null ? siteModel : siteRepository.findByUrl(url));
 
         return siteModel;

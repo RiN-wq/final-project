@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.utils;
 
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
@@ -21,7 +21,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 @Service
-public class ModelProcessingServiceImpl implements ModelProcessingService {
+public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
     private final SiteRepository siteRepository;
     private final PageRepository pageRepository;
@@ -29,11 +29,11 @@ public class ModelProcessingServiceImpl implements ModelProcessingService {
     private final IndexRepository indexRepository;
     private final IndexingStop indexingStop;
 
-    public ModelProcessingServiceImpl(SiteRepository siteRepository,
-                                      PageRepository pageRepository,
-                                      LemmaRepository lemmaRepository,
-                                      IndexRepository indexRepository,
-                                      IndexingStop indexingStop) {
+    public ModelProcessingUtilImpl(SiteRepository siteRepository,
+                                   PageRepository pageRepository,
+                                   LemmaRepository lemmaRepository,
+                                   IndexRepository indexRepository,
+                                   IndexingStop indexingStop) {
         this.siteRepository = siteRepository;
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
@@ -254,8 +254,7 @@ public class ModelProcessingServiceImpl implements ModelProcessingService {
             return;
         }
 
-        indexRepository.deleteAllInBatch(indexRepository.findAllByPageModel(pageModel));
-        lemmaRepository.deleteAllInBatch(lemmaRepository.findAllBySiteModel(pageModel.getSiteModel()));
+        clearLemmaAndIndexTablesByPageModel(indexRepository.findAllByPageModel(pageModel));
         pageRepository.delete(pageModel);
 
     }

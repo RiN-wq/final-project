@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.utils;
 
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -28,10 +28,10 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
 
     String regexFiles = "^.*\\.(jpg|JPG|gif|GIF|doc|DOC|pdf|PDF)$";
     String regexWebsite;
-    private final LemmaService lemmaService;
+    private final LemmaUtil lemmaUtil;
     private final IndexingStop indexingStop;
 
-    private final ModelProcessingService modelProcessingService;
+    private final ModelProcessingUtil modelProcessingUtil;
 
 
     @Autowired
@@ -39,17 +39,17 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
                                  PageRepository pageRepository,
                                  SiteModel siteModel,
                                  PageModel pageModel,
-                                 LemmaService lemmaService,
+                                 LemmaUtil lemmaUtil,
                                  IndexingStop indexingStop,
-                                 ModelProcessingService modelProcessingService) {
+                                 ModelProcessingUtil modelProcessingUtil) {
         this.pageModel = pageModel;
         this.siteRepository = siteRepository;
         this.siteModel = siteModel;
         this.pageRepository = pageRepository;
-        this.lemmaService = lemmaService;
+        this.lemmaUtil = lemmaUtil;
         this.indexingStop = indexingStop;
         regexWebsite = siteModel.getUrl() + "[^#]*";
-        this.modelProcessingService = modelProcessingService;
+        this.modelProcessingUtil = modelProcessingUtil;
     }
 
     @Override
@@ -80,14 +80,14 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
 
         Map<PageModel, Elements> pageModelResponseMap;
         try {
-            pageModelResponseMap = modelProcessingService
+            pageModelResponseMap = modelProcessingUtil
                     .createOrUpdatePageModel(siteModel, pageModel.getPath(), pageModel);
             pageModel = pageModelResponseMap.entrySet().iterator().next().getKey();
-            siteModel = modelProcessingService.setStatusTimeToSiteModel(siteModel);
-            lemmaService.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
+            siteModel = modelProcessingUtil.setStatusTimeToSiteModel(siteModel);
+            lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
         } catch (IOException | DuplicateException | RedirectionException |
                  ClientException | ServerException | RuntimeException e) {
-            modelProcessingService.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
+            modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
             return null;
         }
         return pageModelResponseMap;
@@ -111,8 +111,8 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
 
             WebsiteFJPServiceImpl recursiveWebsiteMap =
                     new WebsiteFJPServiceImpl(siteRepository, pageRepository, siteModel,
-                            modelProcessingService.setPathToPageModel(path),
-                            lemmaService, indexingStop, modelProcessingService); // рекурсивный вызов класса
+                            modelProcessingUtil.setPathToPageModel(path),
+                            lemmaUtil, indexingStop, modelProcessingUtil); // рекурсивный вызов класса
 
             recursiveWebsiteMap.fork(); // отправление задачи в очередь ПОТОКА (НО НЕ ЗАПУСК ВЫПОЛНЕНИЯ)
         }
