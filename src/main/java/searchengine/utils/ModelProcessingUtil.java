@@ -26,9 +26,10 @@ public interface ModelProcessingUtil {
     PageModel createOrUpdatePageModel(SiteModel siteModel,
                                       String path) throws
             IOException, DuplicateException, RedirectionException, ClientException, ServerException;
-    public void checkIfThePageIsTheMainPage(SiteModel siteModel,
-                                            PageModel pageModel,
-                                            Exception e);
+
+    void checkIfThePageIsTheMainPage(SiteModel siteModel,
+                                     PageModel pageModel,
+                                     Exception e);
 
     void throwExceptionByStatusCode(int statusCode) throws RedirectionException, ClientException, ServerException;
 

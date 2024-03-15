@@ -65,9 +65,9 @@ public class SearchServiceImpl implements SearchService {
             throw new EmptyRequestException("Ошибка пустого запроса");
         }
 
-        /*if (!isListOfSitesWasIndexed(searchParameters)) {
+        if (!isListOfSitesWasIndexed(searchParameters)) {
             throw new IndexingException("Требуемые сайты частично или полностью не проиндексированы");
-        }*/
+        }
 
         Map<PageModel, Float> relevancePageModelMap = getSortedRelativeRelevancePageModelMap(searchParameters);
 
