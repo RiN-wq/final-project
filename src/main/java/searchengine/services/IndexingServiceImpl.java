@@ -5,9 +5,15 @@ import org.springframework.stereotype.Service;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
 import searchengine.dto.indexing.IndexingStop;
-import searchengine.dto.responses.SimpleResponse;
-import searchengine.exceptions.*;
-import searchengine.models.*;
+import searchengine.dto.responses.Response;
+import searchengine.dto.responses.SimpleErrorResponse;
+import searchengine.dto.responses.SimpleSuccessfulResponse;
+import searchengine.exceptions.DuplicateException;
+import searchengine.exceptions.InvalidInputException;
+import searchengine.exceptions.WebException;
+import searchengine.models.PageModel;
+import searchengine.models.SiteModel;
+import searchengine.models.Status;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
 import searchengine.repositories.SiteRepository;
@@ -17,7 +23,9 @@ import searchengine.utils.WebsiteFJPServiceImpl;
 
 import java.io.IOException;
 import java.time.ZoneId;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,7 +39,8 @@ public class IndexingServiceImpl implements IndexingService {
     ForkJoinPool forkJoinPool;
     boolean indexingFlag;
     private final ModelProcessingUtil modelProcessingUtil;
-    private final SimpleResponse simpleResponse;
+    private final SimpleErrorResponse simpleErrorResponse;
+    private final SimpleSuccessfulResponse simpleSuccessfulResponse;
     private final LemmaUtil lemmaUtil;
     private final IndexingStop indexingStop;
 
@@ -41,7 +50,8 @@ public class IndexingServiceImpl implements IndexingService {
                                LemmaRepository lemmaRepository,
                                SitesList sitesList,
                                ModelProcessingUtil modelProcessingUtil,
-                               SimpleResponse simpleResponse,
+                               SimpleErrorResponse simpleErrorResponse,
+                               SimpleSuccessfulResponse simpleSuccessfulResponse,
                                LemmaUtil lemmaUtil,
                                IndexingStop indexingStop) {
         this.siteRepository = siteRepository;
@@ -49,35 +59,35 @@ public class IndexingServiceImpl implements IndexingService {
         this.lemmaRepository = lemmaRepository;
         this.sitesList = sitesList;
         this.modelProcessingUtil = modelProcessingUtil;
-        this.simpleResponse = simpleResponse;
+        this.simpleErrorResponse = simpleErrorResponse;
+        this.simpleSuccessfulResponse = simpleSuccessfulResponse;
         this.lemmaUtil = lemmaUtil;
         this.indexingStop = indexingStop;
     }
 
     @Override
-    public List<SimpleResponse> indexAllSites() {
+    public Response indexAllSites() {
 
         if (isIndexingGoingOnNow()) {
-            return getResponse(false, "Индексация уже запущена");
+            return getResponse("Индексация уже запущена");
         }
 
         List<Site> sites = sitesList.getSites();
 
         forkJoinPool = new ForkJoinPool();
-        List<SimpleResponse> response = new ArrayList<>();
 
         for (Site site : sites) {
             modelProcessingUtil.clearTables(siteRepository.findByUrl(site.getUrl()));
         }
 
         try {
-            startIndexing(sites, response);
+            startIndexing(sites);
         } catch (InterruptedException e) {
             System.err.println(e.toString());
         }
 
         indexingFlag = false;
-        return response;
+        return getResponse("");
     }
 
     public boolean isIndexingGoingOnNow() {
@@ -94,14 +104,12 @@ public class IndexingServiceImpl implements IndexingService {
     }
 
 
-    public void startIndexing(List<Site> sitesList,
-                              List<SimpleResponse> response) throws InterruptedException {
+    public void startIndexing(List<Site> sitesList) throws InterruptedException {
         for (Site siteIterator : sitesList) {
             SiteModel siteModel = new SiteModel();
 
             if (indexingStop.isStopIndexingFlag()) {
                 modelProcessingUtil.createOrUpdateSiteModel(siteIterator, Status.FAILED, siteModel);
-                response.addAll(getResponse(indexingStop.isStopIndexingFlag(), siteModel.getLastError()));
                 continue;
             }
 
@@ -118,15 +126,13 @@ public class IndexingServiceImpl implements IndexingService {
             modelProcessingUtil.createOrUpdateSiteModel(siteIterator,
                     (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
                             Status.FAILED : Status.INDEXED, siteModel);
-
-            response.addAll(getResponse(indexingStop.isStopIndexingFlag(), siteModel.getLastError()));
         }
     }
 
 
-    public List<SimpleResponse> indexPage(String path) {
+    public Response indexPage(String path) {
         if (isIndexingGoingOnNow()) {
-            return getResponse(false, "Индексация уже запущена");
+            return getResponse("Индексация уже запущена");
         }
         SiteModel siteModel;
         PageModel pageModel = null;
@@ -136,23 +142,21 @@ public class IndexingServiceImpl implements IndexingService {
             siteModel = findOrCreateSiteByPagePath(path);
         } catch (InvalidInputException e) {
             indexingFlag = false;
-            return getResponse(false, e.toString());
+            return getResponse(e.toString());
         }
-
         modelProcessingUtil.clearTables(pageRepository.findByPath(path));
 
         try {
             pageModel = modelProcessingUtil.createOrUpdatePageModel(siteModel, path);
             lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
-        } catch (IOException | DuplicateException |
-                 RedirectionException | ClientException | ServerException | RuntimeException e) {
+        } catch (IOException | DuplicateException | WebException | RuntimeException e) {
             modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
             indexingFlag = false;
-            return getResponse(false, modelProcessingUtil.getPageModelExceptionMessage(e));
+            return getResponse(modelProcessingUtil.getPageModelExceptionMessage(e));
         }
 
         indexingFlag = false;
-        return getResponse(true, "");
+        return getResponse("");
     }
 
 
@@ -177,44 +181,52 @@ public class IndexingServiceImpl implements IndexingService {
 
         SiteModel siteModel = new SiteModel();
 
-        List<Site> sites = sitesList.getSites();
+        List<Site> matchingSite = new ArrayList<>();
 
-        List<Site> matchingSite = sites.stream()
-                .filter(site -> path.matches(site.getUrl().strip() + "[^#]*")).toList();
+        for (Site site : sitesList.getSites()) {
+            String siteDomainName = site.getUrl().replaceAll("(http:|https:)", "")
+                    .replace("/", "");
+
+            if (path.matches("[^#]*" + siteDomainName + "[^#]*")) {
+                matchingSite.add(site);
+            }
+        }
 
         if (matchingSite.size() != 1) {
             throw new InvalidInputException("Количество подходящий сайтов из файла конфигурации не равно 1");
         }
-
-        String url = matchingSite.get(0).getUrl();
+        String siteUrl = matchingSite.get(0).getUrl();
 
         siteModel = modelProcessingUtil.createOrUpdateSiteModel(matchingSite.get(0),
-                siteRepository.findByUrl(url) == null ? Status.INDEXING : siteRepository.findByUrl(url).getStatus(),
-                siteRepository.findByUrl(url) == null ? siteModel : siteRepository.findByUrl(url));
+                siteRepository.findByUrl(siteUrl) == null ? Status.INDEXING
+                        : siteRepository.findByUrl(siteUrl).getStatus(),
+                siteRepository.findByUrl(siteUrl) == null ? siteModel
+                        : siteRepository.findByUrl(siteUrl));
 
         return siteModel;
     }
 
 
-    public List<SimpleResponse> stopIndexing() {
+    public Response stopIndexing() {
 
         if (forkJoinPool == null || forkJoinPool.isShutdown()) {
-            return getResponse(false, "Индексация ещё не запущена");
+            return getResponse("Индексация ещё не запущена");
         }
 
         forkJoinPool.shutdownNow();
         indexingStop.setStopIndexingFlag(true);
 
-        return getResponse(true, "");
+        return getResponse("");
     }
 
-    public List<SimpleResponse> getResponse(boolean result,
-                                            String error) {
+    public Response getResponse(String error) {
 
-        simpleResponse.setResult(result);
-        simpleResponse.setError(error);
-
-        return List.of(simpleResponse);
+        if (error.isBlank()){
+            return simpleSuccessfulResponse;
+        } else {
+            simpleErrorResponse.setError(error);
+            return simpleErrorResponse;
+        }
 
     }
 
@@ -231,7 +243,6 @@ public class IndexingServiceImpl implements IndexingService {
     }
 
     public String getSiteStatus(Site site) {
-        // Если записи сайта ещё не существует
         if (siteRepository.findByUrl(site.getUrl()) == null) {
             return Status.INDEXING.toString();
         }

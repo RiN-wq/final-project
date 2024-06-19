@@ -3,10 +3,7 @@ package searchengine.utils;
 import org.jsoup.Connection;
 import org.jsoup.select.Elements;
 import searchengine.config.Site;
-import searchengine.exceptions.ClientException;
-import searchengine.exceptions.DuplicateException;
-import searchengine.exceptions.RedirectionException;
-import searchengine.exceptions.ServerException;
+import searchengine.exceptions.*;
 import searchengine.models.*;
 
 import java.io.IOException;
@@ -21,17 +18,17 @@ public interface ModelProcessingUtil {
     Map<PageModel, Elements> createOrUpdatePageModel(SiteModel siteModel,
                                                      String path,
                                                      PageModel pageModel) throws
-            IOException, DuplicateException, RedirectionException, ClientException, ServerException;
+            IOException, DuplicateException, WebException;
 
     PageModel createOrUpdatePageModel(SiteModel siteModel,
                                       String path) throws
-            IOException, DuplicateException, RedirectionException, ClientException, ServerException;
+            IOException, DuplicateException, WebException;
 
     void checkIfThePageIsTheMainPage(SiteModel siteModel,
                                      PageModel pageModel,
                                      Exception e);
 
-    void throwExceptionByStatusCode(int statusCode) throws RedirectionException, ClientException, ServerException;
+    void throwExceptionByStatusCode(int statusCode) throws WebException;
 
     void getClientException(int statusCode) throws ClientException;
 

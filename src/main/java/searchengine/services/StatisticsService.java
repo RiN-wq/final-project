@@ -2,7 +2,7 @@ package searchengine.services;
 
 import searchengine.config.Site;
 import searchengine.dto.statistics.DetailedStatisticsItem;
-import searchengine.dto.statistics.StatisticsResponse;
+import searchengine.dto.responses.StatisticsResponse;
 import searchengine.dto.statistics.TotalStatistics;
 
 import java.util.List;

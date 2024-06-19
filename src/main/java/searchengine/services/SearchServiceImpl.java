@@ -4,7 +4,7 @@ import org.apache.lucene.morphology.LuceneMorphology;
 import org.apache.lucene.morphology.english.EnglishLuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.springframework.stereotype.Service;
-import searchengine.dto.responses.SimpleResponse;
+import searchengine.dto.responses.SimpleErrorResponse;
 import searchengine.dto.searching.SearchData;
 import searchengine.dto.searching.SearchParameters;
 import searchengine.dto.responses.SearchResponse;
@@ -31,30 +31,29 @@ public class SearchServiceImpl implements SearchService {
     private final IndexRepository indexRepository;
     private final SiteRepository siteRepository;
     private final LemmaUtil lemmaUtil;
-    private final SimpleResponse simpleResponse;
+    private final SimpleErrorResponse simpleErrorResponse;
     private final SearchResponse searchResponse;
     private SearchData searchData;
 
     public SearchServiceImpl(IndexRepository indexRepository,
                              SiteRepository siteRepository,
                              LemmaUtil lemmaUtil,
-                             SimpleResponse simpleResponse,
+                             SimpleErrorResponse simpleErrorResponse,
                              SearchResponse searchResponse,
                              SearchData searchData) {
         this.indexRepository = indexRepository;
         this.siteRepository = siteRepository;
         this.lemmaUtil = lemmaUtil;
         this.searchResponse = searchResponse;
-        this.simpleResponse = simpleResponse;
+        this.simpleErrorResponse = simpleErrorResponse;
         this.searchData = searchData;
     }
 
-    public SimpleResponse getSimpleErrorResponse(String errorText) {
+    public SimpleErrorResponse getSimpleErrorResponse(String errorText) {
 
-        simpleResponse.setResult(false);
-        simpleResponse.setError(errorText);
+        simpleErrorResponse.setError(errorText);
 
-        return simpleResponse;
+        return simpleErrorResponse;
 
     }
 

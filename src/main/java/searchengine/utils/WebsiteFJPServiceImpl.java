@@ -5,10 +5,7 @@ import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.dto.indexing.IndexingStop;
-import searchengine.exceptions.ClientException;
-import searchengine.exceptions.DuplicateException;
-import searchengine.exceptions.RedirectionException;
-import searchengine.exceptions.ServerException;
+import searchengine.exceptions.*;
 import searchengine.models.PageModel;
 import searchengine.models.SiteModel;
 import searchengine.repositories.PageRepository;
@@ -85,8 +82,7 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
             pageModel = pageModelResponseMap.entrySet().iterator().next().getKey();
             siteModel = modelProcessingUtil.setStatusTimeToSiteModel(siteModel);
             lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
-        } catch (IOException | DuplicateException | RedirectionException |
-                 ClientException | ServerException | RuntimeException e) {
+        } catch (IOException | DuplicateException | WebException | RuntimeException e) {
             modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
             return null;
         }

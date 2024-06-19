@@ -6,10 +6,7 @@ import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 import searchengine.config.Site;
 import searchengine.dto.indexing.IndexingStop;
-import searchengine.exceptions.ClientException;
-import searchengine.exceptions.DuplicateException;
-import searchengine.exceptions.RedirectionException;
-import searchengine.exceptions.ServerException;
+import searchengine.exceptions.*;
 import searchengine.models.*;
 import searchengine.repositories.IndexRepository;
 import searchengine.repositories.LemmaRepository;
@@ -71,7 +68,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
     public Map<PageModel, Elements> createOrUpdatePageModel(SiteModel siteModel,
                                                             String path,
                                                             PageModel pageModel) throws
-            IOException, DuplicateException, RedirectionException, ClientException, ServerException {
+            IOException, DuplicateException, WebException {
 
         pageModel.setSiteModel(siteModel);
         pageModel.setPath(path);
@@ -85,7 +82,6 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
         pageModel.setContent(connection.body());
 
         synchronized (pageRepository) {
-            // если уже добавлена страница
             if (pageRepository.findByPath(pageModel.getPath()) != null) {
                 throw new DuplicateException("Попытка вставки дубликата");
             }
@@ -99,7 +95,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
     public PageModel createOrUpdatePageModel(SiteModel siteModel,
                                              String path) throws
-            IOException, DuplicateException, RedirectionException, ClientException, ServerException {
+            IOException, DuplicateException, WebException {
 
         return createOrUpdatePageModel
                 (siteModel, path, new PageModel()).entrySet().iterator().next().getKey();
@@ -118,7 +114,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
     }
 
     public void throwExceptionByStatusCode(int statusCode)
-            throws RedirectionException, ClientException, ServerException {
+            throws WebException {
 
         switch (String.valueOf(statusCode).substring(0, 1)) {
             case "2":

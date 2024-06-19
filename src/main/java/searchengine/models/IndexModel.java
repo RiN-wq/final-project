@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 @Setter
 @NoArgsConstructor
 @Entity
-@Table(name = "index_")
+@Table(name = "`index`")
 @Component
 public class IndexModel {
     @Id
@@ -22,6 +22,6 @@ public class IndexModel {
     @ManyToOne(cascade = CascadeType.MERGE/*, fetch = FetchType.LAZY*/)
     @JoinColumn(name = "lemma_id", nullable = false)
     private LemmaModel lemmaModel;
-    @Column(name = "rank_",columnDefinition = "FLOAT NOT NULL")
+    @Column(name = "`rank`",columnDefinition = "FLOAT NOT NULL")
     private float rank;
 }

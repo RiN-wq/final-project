@@ -1,29 +1,30 @@
 package searchengine.services;
 
 import searchengine.config.Site;
-import searchengine.dto.responses.SimpleResponse;
+import searchengine.dto.responses.Response;
 import searchengine.exceptions.InvalidInputException;
 import searchengine.models.*;
 
 import java.util.List;
 
 public interface IndexingService {
-    List<SimpleResponse> indexAllSites();
+
+    Response indexAllSites();
 
     boolean isIndexingGoingOnNow();
 
-    void startIndexing(List<Site> sitesList, List<SimpleResponse> response) throws InterruptedException;
+    void startIndexing(List<Site> sitesList) throws InterruptedException;
 
-    List<SimpleResponse> indexPage(String path);
+    Response indexPage(String path);
 
     String getCorrectPathForm(String path) throws InvalidInputException;
 
     SiteModel findOrCreateSiteByPagePath(String path) throws InvalidInputException;
 
-    List<SimpleResponse> stopIndexing();
+    Response stopIndexing();
 
-    List<SimpleResponse> getResponse(boolean errorCheckerFlag,
-                                     String error);
+    Response getResponse(String error);
+
 
     boolean getIndexingStatus();
 

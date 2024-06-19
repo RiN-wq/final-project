@@ -1,7 +1,7 @@
 package searchengine.services;
 
 import org.apache.lucene.morphology.LuceneMorphology;
-import searchengine.dto.responses.SimpleResponse;
+import searchengine.dto.responses.SimpleErrorResponse;
 import searchengine.dto.searching.SearchData;
 import searchengine.dto.searching.SearchParameters;
 import searchengine.dto.responses.SearchResponse;
@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 public interface SearchService {
-    SimpleResponse getSimpleErrorResponse(String errorText);
+    SimpleErrorResponse getSimpleErrorResponse(String errorText);
 
     SearchResponse getSearchResponse(SearchParameters searchParameters) throws
             EmptyRequestException, NoSearchResultException, IndexingException;
