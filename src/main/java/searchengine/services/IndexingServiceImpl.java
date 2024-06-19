@@ -76,17 +76,14 @@ public class IndexingServiceImpl implements IndexingService {
 
         forkJoinPool = new ForkJoinPool();
 
-        for (Site site : sites) {
-            modelProcessingUtil.clearTables(siteRepository.findByUrl(site.getUrl()));
-        }
+        new Thread(() -> {
+            try {
+                startIndexing(sites);
+            } catch (InterruptedException e) {
+                System.err.println(e.toString());
+            }
+        }).start();
 
-        try {
-            startIndexing(sites);
-        } catch (InterruptedException e) {
-            System.err.println(e.toString());
-        }
-
-        indexingFlag = false;
         return getResponse("");
     }
 
@@ -106,6 +103,9 @@ public class IndexingServiceImpl implements IndexingService {
 
     public void startIndexing(List<Site> sitesList) throws InterruptedException {
         for (Site siteIterator : sitesList) {
+
+            modelProcessingUtil.clearTables(siteRepository.findByUrl(siteIterator.getUrl()));
+
             SiteModel siteModel = new SiteModel();
 
             if (indexingStop.isStopIndexingFlag()) {
@@ -127,6 +127,8 @@ public class IndexingServiceImpl implements IndexingService {
                     (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
                             Status.FAILED : Status.INDEXED, siteModel);
         }
+
+        indexingFlag = false;
     }
 
 
@@ -215,6 +217,13 @@ public class IndexingServiceImpl implements IndexingService {
 
         forkJoinPool.shutdownNow();
         indexingStop.setStopIndexingFlag(true);
+
+        try {
+            Thread.sleep(3000);
+        }catch (Exception e){
+            System.err.println(e);
+        }
+
 
         return getResponse("");
     }

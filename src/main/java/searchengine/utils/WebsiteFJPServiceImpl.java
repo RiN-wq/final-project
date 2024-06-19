@@ -59,7 +59,7 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
         try {
             Thread.sleep(400);
         } catch (InterruptedException e) {
-            System.err.println(e.toString());
+            Thread.currentThread().interrupt();
         }
 
         Map<PageModel, Elements> pageModelResponseMap = setAllModelsForPageModel(siteModel, pageModel);
@@ -108,9 +108,9 @@ public class WebsiteFJPServiceImpl extends RecursiveAction
             WebsiteFJPServiceImpl recursiveWebsiteMap =
                     new WebsiteFJPServiceImpl(siteRepository, pageRepository, siteModel,
                             modelProcessingUtil.setPathToPageModel(path),
-                            lemmaUtil, indexingStop, modelProcessingUtil); // рекурсивный вызов класса
+                            lemmaUtil, indexingStop, modelProcessingUtil);
 
-            recursiveWebsiteMap.fork(); // отправление задачи в очередь ПОТОКА (НО НЕ ЗАПУСК ВЫПОЛНЕНИЯ)
+            recursiveWebsiteMap.fork();
         }
 
     }
