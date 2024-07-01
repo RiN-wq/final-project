@@ -3,7 +3,9 @@ package searchengine.utils;
 import org.jsoup.Connection;
 import org.jsoup.select.Elements;
 import searchengine.config.Site;
-import searchengine.exceptions.*;
+import searchengine.exceptions.ClientException;
+import searchengine.exceptions.DuplicateException;
+import searchengine.exceptions.WebException;
 import searchengine.models.*;
 
 import java.io.IOException;

@@ -3,7 +3,7 @@ package searchengine.services;
 import searchengine.config.Site;
 import searchengine.dto.responses.Response;
 import searchengine.exceptions.InvalidInputException;
-import searchengine.models.*;
+import searchengine.models.SiteModel;
 
 import java.util.List;
 

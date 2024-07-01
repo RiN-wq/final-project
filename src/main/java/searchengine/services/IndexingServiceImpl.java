@@ -80,7 +80,7 @@ public class IndexingServiceImpl implements IndexingService {
             try {
                 startIndexing(sites);
             } catch (InterruptedException e) {
-                System.err.println(e.toString());
+                System.err.println(e.getMessage());
             }
         }).start();
 
@@ -137,21 +137,23 @@ public class IndexingServiceImpl implements IndexingService {
             return getResponse("Индексация уже запущена");
         }
         SiteModel siteModel;
-        PageModel pageModel = null;
 
         try {
             path = getCorrectPathForm(path);
             siteModel = findOrCreateSiteByPagePath(path);
         } catch (InvalidInputException e) {
             indexingFlag = false;
-            return getResponse(e.toString());
+            return getResponse(e.getMessage());
         }
+
+        PageModel pageModel = new PageModel();
         modelProcessingUtil.clearTables(pageRepository.findByPath(path));
 
         try {
             pageModel = modelProcessingUtil.createOrUpdatePageModel(siteModel, path);
             lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
         } catch (IOException | DuplicateException | WebException | RuntimeException e) {
+            pageModel.setPath(path);
             modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
             indexingFlag = false;
             return getResponse(modelProcessingUtil.getPageModelExceptionMessage(e));

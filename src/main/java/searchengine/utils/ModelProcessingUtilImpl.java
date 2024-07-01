@@ -3,7 +3,7 @@ package searchengine.utils;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.select.Elements;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import searchengine.config.Site;
 import searchengine.dto.indexing.IndexingStop;
 import searchengine.exceptions.*;
@@ -15,9 +15,13 @@ import searchengine.repositories.SiteRepository;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
 
-@Service
+@Component
 public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
     private final SiteRepository siteRepository;
@@ -107,7 +111,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
                                             Exception e) {
 
         if (siteModel.getUrl().equals(pageModel.getPath()) && !(e instanceof DuplicateException)) {
-            siteModel.setLastError("Сайт недоступен, ошибка главной страницы:\"" + e.toString() + "\"");
+            siteModel.setLastError("Сайт недоступен, ошибка главной страницы:\"" + e.getMessage() + "\"");
             createOrUpdateSiteModel(new Site(siteModel.getUrl(), siteModel.getName()), Status.FAILED, siteModel);
         }
 
@@ -160,7 +164,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
                 e instanceof ClientException ||
                 e instanceof ServerException ||
                 e instanceof RuntimeException) {
-            return e.toString();
+            return e.getMessage();
         }
 
         return "error";

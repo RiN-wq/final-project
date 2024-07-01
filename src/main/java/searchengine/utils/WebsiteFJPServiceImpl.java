@@ -3,9 +3,10 @@ package searchengine.utils;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import searchengine.dto.indexing.IndexingStop;
-import searchengine.exceptions.*;
+import searchengine.exceptions.DuplicateException;
+import searchengine.exceptions.WebException;
 import searchengine.models.PageModel;
 import searchengine.models.SiteModel;
 import searchengine.repositories.PageRepository;
@@ -15,7 +16,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.RecursiveAction;
 
-@Service
+@Component
 public class WebsiteFJPServiceImpl extends RecursiveAction
         implements WebsiteFJPService {
     private final SiteRepository siteRepository;

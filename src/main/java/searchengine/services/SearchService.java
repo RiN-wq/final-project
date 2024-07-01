@@ -1,10 +1,10 @@
 package searchengine.services;
 
 import org.apache.lucene.morphology.LuceneMorphology;
+import searchengine.dto.responses.SearchResponse;
 import searchengine.dto.responses.SimpleErrorResponse;
 import searchengine.dto.searching.SearchData;
 import searchengine.dto.searching.SearchParameters;
-import searchengine.dto.responses.SearchResponse;
 import searchengine.exceptions.EmptyRequestException;
 import searchengine.exceptions.IndexingException;
 import searchengine.exceptions.NoSearchResultException;

@@ -6,7 +6,7 @@ import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.jsoup.Jsoup;
 import org.jsoup.safety.Safelist;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import searchengine.models.IndexModel;
 import searchengine.models.LemmaModel;
 import searchengine.models.PageModel;
@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
-@Service
+@Component
 public class LemmaUtilImpl implements LemmaUtil {
 
     private final LemmaRepository lemmaRepository;
