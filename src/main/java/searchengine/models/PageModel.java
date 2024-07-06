@@ -19,7 +19,7 @@ public class PageModel {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
-    @ManyToOne(cascade = CascadeType.MERGE/*, fetch = FetchType.LAZY*/)
+    @ManyToOne(cascade = CascadeType.MERGE)
     @JoinColumn(name = "site_id", nullable = false)
     private SiteModel siteModel;
 

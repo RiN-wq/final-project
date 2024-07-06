@@ -11,8 +11,12 @@ import searchengine.models.*;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 
 public interface ModelProcessingUtil {
+    void initializeSetOfPaths(List<Site> sites);
+    boolean isPathChecked(String path);
+    boolean writeCheckedPath(String path);
     SiteModel createOrUpdateSiteModel(Site site, Status status, SiteModel siteModel);
 
     SiteModel setStatusTimeToSiteModel(SiteModel siteModel);
@@ -24,10 +28,10 @@ public interface ModelProcessingUtil {
 
     PageModel createOrUpdatePageModel(SiteModel siteModel,
                                       String path) throws
-            IOException, DuplicateException, WebException;
+            IOException, WebException;
 
     void checkIfThePageIsTheMainPage(SiteModel siteModel,
-                                     PageModel pageModel,
+                                     String path,
                                      Exception e);
 
     void throwExceptionByStatusCode(int statusCode) throws WebException;
@@ -44,13 +48,12 @@ public interface ModelProcessingUtil {
                                         String lemma,
                                         LemmaModel lemmaModel);
 
-    LemmaModel synchronizedAddFrequency(LemmaModel lemmaModel, String lemma);
-
     void saveIndexModel(PageModel pageModel,
                         LemmaModel lemmaModel,
                         float rank);
 
-    void clearTables(SiteModel siteModel);
+    void clearTables(SiteModel siteModel, CountDownLatch countDownLatchOfClear);
+    void deleteIndexesInBatch(List<PageModel> pageModelList, List<IndexModel> batchForDeleting);
 
     void clearTables(PageModel pageModel);
 

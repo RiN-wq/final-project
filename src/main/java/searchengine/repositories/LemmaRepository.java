@@ -10,6 +10,6 @@ import java.util.List;
 @Repository
 public interface LemmaRepository extends JpaRepository<LemmaModel, Integer> {
     LemmaModel findByLemma(String lemma);
-    int countBySiteModel(SiteModel siteModel);
     List<LemmaModel> findAllBySiteModel(SiteModel siteModel);
+    int countBySiteModel(SiteModel siteModel);
 }

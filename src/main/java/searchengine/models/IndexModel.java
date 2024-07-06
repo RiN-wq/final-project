@@ -16,10 +16,10 @@ public class IndexModel {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
-    @ManyToOne(cascade = CascadeType.MERGE/*, fetch = FetchType.LAZY*/)
+    @ManyToOne(cascade = CascadeType.MERGE)
     @JoinColumn(name = "page_id", nullable = false)
     private PageModel pageModel;
-    @ManyToOne(cascade = CascadeType.MERGE/*, fetch = FetchType.LAZY*/)
+    @ManyToOne(cascade = CascadeType.MERGE)
     @JoinColumn(name = "lemma_id", nullable = false)
     private LemmaModel lemmaModel;
     @Column(name = "`rank`",columnDefinition = "FLOAT NOT NULL")

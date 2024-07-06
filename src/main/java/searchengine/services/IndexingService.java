@@ -5,7 +5,9 @@ import searchengine.dto.responses.Response;
 import searchengine.exceptions.InvalidInputException;
 import searchengine.models.SiteModel;
 
-import java.util.List;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ForkJoinPool;
 
 public interface IndexingService {
 
@@ -13,7 +15,8 @@ public interface IndexingService {
 
     boolean isIndexingGoingOnNow();
 
-    void startIndexing(List<Site> sitesList) throws InterruptedException;
+    void startIndexing(Site site, ForkJoinPool forkJoinPool)
+            throws InterruptedException, BrokenBarrierException;
 
     Response indexPage(String path);
 

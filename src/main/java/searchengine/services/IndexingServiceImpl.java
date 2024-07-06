@@ -26,7 +26,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,14 +36,14 @@ public class IndexingServiceImpl implements IndexingService {
     private final PageRepository pageRepository;
     private final LemmaRepository lemmaRepository;
     private final SitesList sitesList;
-    ForkJoinPool forkJoinPool;
-    boolean indexingFlag;
+    Boolean indexingFlag = Boolean.FALSE;
     private final ModelProcessingUtil modelProcessingUtil;
     private final SimpleErrorResponse simpleErrorResponse;
     private final SimpleSuccessfulResponse simpleSuccessfulResponse;
     private final LemmaUtil lemmaUtil;
     private final IndexingStop indexingStop;
-
+    private CyclicBarrier indexationCyclicBarrier;
+    private CountDownLatch countDownLatchOfClear;
     @Autowired
     public IndexingServiceImpl(SiteRepository siteRepository,
                                PageRepository pageRepository,
@@ -71,19 +71,89 @@ public class IndexingServiceImpl implements IndexingService {
         if (isIndexingGoingOnNow()) {
             return getResponse("Индексация уже запущена");
         }
-
         List<Site> sites = sitesList.getSites();
 
-        forkJoinPool = new ForkJoinPool();
+        modelProcessingUtil.initializeSetOfPaths(sites);
 
-        new Thread(() -> {
+        ExecutorService poolOfSitesThreads = Executors.newFixedThreadPool(sites.size());
+
+        countDownLatchOfClear = new CountDownLatch(sites.size());
+
+        indexationCyclicBarrier = new CyclicBarrier(sites.size(), () -> {
+            indexingFlag = false;
+            poolOfSitesThreads.shutdown();
+        });
+
+        sites.forEach(site -> poolOfSitesThreads.submit(() -> {
             try {
-                startIndexing(sites);
-            } catch (InterruptedException e) {
-                System.err.println(e.getMessage());
+                startIndexing(site, new ForkJoinPool());
+            } catch (InterruptedException | BrokenBarrierException e) {
+                throw new RuntimeException(e);
             }
-        }).start();
+        }));
 
+        return getResponse("");
+    }
+
+    public void startIndexing(Site site, ForkJoinPool forkJoinPool)
+            throws InterruptedException, BrokenBarrierException {
+
+        modelProcessingUtil.clearTables(siteRepository.findByUrl(site.getUrl()), countDownLatchOfClear);
+
+        SiteModel siteModel = new SiteModel();
+
+        if (indexingStop.isStopIndexingFlag()) {
+            modelProcessingUtil.createOrUpdateSiteModel(site, Status.FAILED, siteModel);
+            indexationCyclicBarrier.await();
+            return;
+        }
+        siteModel = modelProcessingUtil.createOrUpdateSiteModel(site, Status.INDEXING, siteModel);
+
+        forkJoinPool.submit(new WebsiteFJPServiceImpl(siteModel,
+                modelProcessingUtil.setPathToPageModel(site.getUrl()),
+                lemmaUtil, indexingStop, modelProcessingUtil));
+
+        while (!forkJoinPool.isQuiescent() && !indexingStop.isStopIndexingFlag()) {
+            Thread.sleep(1500);
+        }
+
+        forkJoinPool.shutdown();
+
+        modelProcessingUtil.createOrUpdateSiteModel(site,
+                (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
+                        Status.FAILED : Status.INDEXED, siteModel);
+
+        indexationCyclicBarrier.await();
+    }
+
+    public Response indexPage(String path) {
+        if (isIndexingGoingOnNow()) {
+            return getResponse("Индексация уже запущена");
+        }
+        SiteModel siteModel;
+
+        try {
+            path = getCorrectPathForm(path);
+            siteModel = findOrCreateSiteByPagePath(path);
+        } catch (InvalidInputException e) {
+            indexingFlag = false;
+            return getResponse(e.getMessage());
+        }
+        modelProcessingUtil.clearTables(pageRepository.findByPath(path));
+
+        try {
+            if (pageRepository.findByPath(path) != null) {
+                throw new DuplicateException("Попытка добавления дубликата.");
+            }
+            PageModel pageModel = modelProcessingUtil.createOrUpdatePageModel(siteModel, path);
+            lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
+        } catch (IOException | DuplicateException | WebException | RuntimeException e) {
+            modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, path, e);
+            indexingFlag = false;
+            return getResponse(modelProcessingUtil.getPageModelExceptionMessage(e));
+        }
+
+        indexingFlag = false;
         return getResponse("");
     }
 
@@ -100,70 +170,6 @@ public class IndexingServiceImpl implements IndexingService {
 
     }
 
-
-    public void startIndexing(List<Site> sitesList) throws InterruptedException {
-        for (Site siteIterator : sitesList) {
-
-            modelProcessingUtil.clearTables(siteRepository.findByUrl(siteIterator.getUrl()));
-
-            SiteModel siteModel = new SiteModel();
-
-            if (indexingStop.isStopIndexingFlag()) {
-                modelProcessingUtil.createOrUpdateSiteModel(siteIterator, Status.FAILED, siteModel);
-                continue;
-            }
-
-            siteModel = modelProcessingUtil.createOrUpdateSiteModel(siteIterator, Status.INDEXING, siteModel);
-
-            forkJoinPool.invoke(new WebsiteFJPServiceImpl(siteRepository, pageRepository, siteModel,
-                    modelProcessingUtil.setPathToPageModel(siteIterator.getUrl()),
-                    lemmaUtil, indexingStop, modelProcessingUtil));
-
-            while (!forkJoinPool.isQuiescent()) {
-                Thread.sleep(1000);
-            }
-
-            modelProcessingUtil.createOrUpdateSiteModel(siteIterator,
-                    (indexingStop.isStopIndexingFlag() || siteModel.getLastError() != null) ?
-                            Status.FAILED : Status.INDEXED, siteModel);
-        }
-
-        indexingFlag = false;
-    }
-
-
-    public Response indexPage(String path) {
-        if (isIndexingGoingOnNow()) {
-            return getResponse("Индексация уже запущена");
-        }
-        SiteModel siteModel;
-
-        try {
-            path = getCorrectPathForm(path);
-            siteModel = findOrCreateSiteByPagePath(path);
-        } catch (InvalidInputException e) {
-            indexingFlag = false;
-            return getResponse(e.getMessage());
-        }
-
-        PageModel pageModel = new PageModel();
-        modelProcessingUtil.clearTables(pageRepository.findByPath(path));
-
-        try {
-            pageModel = modelProcessingUtil.createOrUpdatePageModel(siteModel, path);
-            lemmaUtil.addToLemmaAndIndexTables(pageModel.getContent(), siteModel, pageModel);
-        } catch (IOException | DuplicateException | WebException | RuntimeException e) {
-            pageModel.setPath(path);
-            modelProcessingUtil.checkIfThePageIsTheMainPage(siteModel, pageModel, e);
-            indexingFlag = false;
-            return getResponse(modelProcessingUtil.getPageModelExceptionMessage(e));
-        }
-
-        indexingFlag = false;
-        return getResponse("");
-    }
-
-
     public String getCorrectPathForm(String path) throws InvalidInputException {
 
         path = path.replace("url=", "")
@@ -171,9 +177,10 @@ public class IndexingServiceImpl implements IndexingService {
                 .replace("%3A", ":");
 
         Pattern urlPattern = Pattern.compile("((http|https)://(www.)?[a-z0-9-_]+\\.[^.\" \n\t]+)");
+
         Matcher matcher = urlPattern.matcher(path.toLowerCase());
 
-        while (matcher.find()) {
+        if (matcher.find()) {
             return matcher.group(1);
         }
 
@@ -213,26 +220,24 @@ public class IndexingServiceImpl implements IndexingService {
 
     public Response stopIndexing() {
 
-        if (forkJoinPool == null || forkJoinPool.isShutdown()) {
+        if (!indexingFlag) {
             return getResponse("Индексация ещё не запущена");
         }
 
-        forkJoinPool.shutdownNow();
         indexingStop.setStopIndexingFlag(true);
 
         try {
-            Thread.sleep(3000);
-        }catch (Exception e){
-            System.err.println(e);
+            Thread.sleep(2000);
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
         }
-
 
         return getResponse("");
     }
 
     public Response getResponse(String error) {
 
-        if (error.isBlank()){
+        if (error.isBlank()) {
             return simpleSuccessfulResponse;
         } else {
             simpleErrorResponse.setError(error);

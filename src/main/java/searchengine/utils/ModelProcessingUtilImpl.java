@@ -1,8 +1,12 @@
 package searchengine.utils;
 
+import jakarta.persistence.OptimisticLockException;
+import jakarta.persistence.PersistenceException;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.select.Elements;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 import searchengine.config.Site;
 import searchengine.dto.indexing.IndexingStop;
@@ -15,11 +19,8 @@ import searchengine.repositories.SiteRepository;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
 
 @Component
 public class ModelProcessingUtilImpl implements ModelProcessingUtil {
@@ -29,7 +30,6 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
     private final IndexingStop indexingStop;
-
     public ModelProcessingUtilImpl(SiteRepository siteRepository,
                                    PageRepository pageRepository,
                                    LemmaRepository lemmaRepository,
@@ -42,10 +42,24 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
         this.indexingStop = indexingStop;
     }
 
+    private HashSet<String> pageModelSet;
+
+    public void initializeSetOfPaths(List<Site> sites){
+        pageModelSet = new HashSet<>();
+        sites.forEach(site -> writeCheckedPath(site.getUrl()));
+    }
+
+    public boolean isPathChecked(String path){
+        return pageModelSet.contains(path);
+    }
+
+    public synchronized boolean writeCheckedPath(String path){
+        return pageModelSet.add(path);
+    }
+
     public SiteModel createOrUpdateSiteModel(Site site,
                                              Status status,
                                              SiteModel siteModel) {
-
         siteModel.setUrl(site.getUrl());
         siteModel.setName(site.getName());
         siteModel.setStatusTime(LocalDateTime.now());
@@ -72,7 +86,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
     public Map<PageModel, Elements> createOrUpdatePageModel(SiteModel siteModel,
                                                             String path,
                                                             PageModel pageModel) throws
-            IOException, DuplicateException, WebException {
+            IOException, WebException {
 
         pageModel.setSiteModel(siteModel);
         pageModel.setPath(path);
@@ -85,13 +99,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
         pageModel.setContent(connection.body());
 
-        synchronized (pageRepository) {
-            if (pageRepository.findByPath(pageModel.getPath()) != null) {
-                throw new DuplicateException("Попытка вставки дубликата");
-            }
-
-            pageRepository.save(pageModel);
-        }
+        pageRepository.save(pageModel);
 
         return Collections.singletonMap(pageModel, connection.parse().select("a"));
 
@@ -99,7 +107,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
     public PageModel createOrUpdatePageModel(SiteModel siteModel,
                                              String path) throws
-            IOException, DuplicateException, WebException {
+            IOException, WebException {
 
         return createOrUpdatePageModel
                 (siteModel, path, new PageModel()).entrySet().iterator().next().getKey();
@@ -107,11 +115,13 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
     }
 
     public void checkIfThePageIsTheMainPage(SiteModel siteModel,
-                                            PageModel pageModel,
+                                            String path,
                                             Exception e) {
 
-        if (siteModel.getUrl().equals(pageModel.getPath()) && !(e instanceof DuplicateException)) {
-            siteModel.setLastError("Сайт недоступен, ошибка главной страницы:\"" + e.getMessage() + "\"");
+        if (siteModel.getUrl().equals(path) && !(e instanceof DuplicateException)
+                && !(e instanceof OptimisticLockingFailureException) && !(e instanceof PersistenceException)
+                && !(e instanceof InvalidDataAccessApiUsageException)) {
+            siteModel.setLastError("Сайт недоступен, ошибка главной страницы: \"" + e.getMessage() + "\"");
             createOrUpdateSiteModel(new Site(siteModel.getUrl(), siteModel.getName()), Status.FAILED, siteModel);
         }
 
@@ -182,7 +192,7 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
         return Jsoup.connect(path)
                 .userAgent("Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:25.0) Gecko/20100101 Firefox/25.0")
-                .referrer("http://www.google.com").ignoreHttpErrors(true).timeout(4000).execute();
+                .referrer("http://www.google.com").ignoreHttpErrors(true).timeout(3000).execute();
     }
 
     public LemmaModel createOrUpdateLemmaModel(SiteModel siteModel,
@@ -191,23 +201,35 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
         lemmaModel.setSiteModel(siteModel);
         lemmaModel.setLemma(lemma);
-        lemmaModel = synchronizedAddFrequency(lemmaModel, lemma);
+        try {
+            lemmaModel = optimisticLockAddFrequency(lemmaModel, lemma);
+        } catch (InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
 
         return lemmaModel;
 
     }
 
-    synchronized public LemmaModel synchronizedAddFrequency(LemmaModel lemmaModel, String lemma) {
+    public LemmaModel optimisticLockAddFrequency(LemmaModel lemmaModel, String lemma)
+            throws InterruptedException {
 
-        if (lemmaRepository.findByLemma(lemma) != null) {
-            lemmaModel = lemmaRepository.findByLemma(lemma);
-            lemmaModel.setFrequency(lemmaModel.getFrequency() + 1);
-        } else {
-            lemmaModel.setFrequency(1);
+        try {
+            if (lemmaRepository.findByLemma(lemma) != null) {
+                lemmaModel = lemmaRepository.findByLemma(lemma);
+                lemmaModel.setFrequency(lemmaModel.getFrequency() + 1);
+            } else {
+                lemmaModel.setFrequency(1);
+            }
+
+            lemmaRepository.save(lemmaModel);
+            return lemmaModel;
+
+        } catch (OptimisticLockException e){
+            optimisticLockAddFrequency(lemmaModel, lemma);
         }
 
-        lemmaRepository.save(lemmaModel);
-        return lemmaModel;
+        return null;
     }
 
     public void saveIndexModel(PageModel pageModel,
@@ -224,27 +246,46 @@ public class ModelProcessingUtilImpl implements ModelProcessingUtil {
 
     }
 
-    public void clearTables(SiteModel siteModel) {
+    public void clearTables(SiteModel siteModel, CountDownLatch countDownLatchOfClear) {
 
-        List<PageModel> pageModelList = pageRepository.findAllBySiteModel(siteModel);
+        if (siteModel != null){
 
-        if (pageModelList.isEmpty()) {
-            return;
+            List<PageModel> pageModelList = pageRepository.findAllBySiteModel(siteModel);
+            List<IndexModel> batchForDeleting = new ArrayList<>();
+
+            deleteIndexesInBatch(pageModelList, batchForDeleting);
+
+            pageRepository.deleteAllInBatch(pageModelList);
+
+            countDownLatchOfClear.countDown();
+            try {
+                countDownLatchOfClear.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            lemmaRepository.deleteAllInBatch(lemmaRepository.findAllBySiteModel(siteModel));
+
+            siteRepository.delete(siteModel);
         }
 
+    }
 
-        for (PageModel pageModel : pageModelList) {
+    public void deleteIndexesInBatch(List<PageModel> pageModelList, List<IndexModel> batchForDeleting){
 
-            if (indexingStop.isStopIndexingFlag()) {
+        for (int i = 0; i < pageModelList.size(); i++) {
+            if (indexingStop.isStopIndexingFlag()){
                 return;
             }
+            batchForDeleting.addAll(indexRepository.findAllByPageModel(pageModelList.get(i)));
 
-            clearLemmaAndIndexTablesByPageModel(indexRepository.findAllByPageModel(pageModel));
-
-            pageRepository.delete(pageModel);
+            if (i != 0 && i % 12 == 0){
+                indexRepository.flush();
+                indexRepository.deleteAllInBatch(batchForDeleting);
+                batchForDeleting.clear();
+            }
         }
 
-        siteRepository.delete(siteModel);
+        indexRepository.deleteAllInBatch(batchForDeleting);
 
     }
 

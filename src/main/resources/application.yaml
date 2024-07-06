@@ -18,10 +18,12 @@ indexing-settings:
   sites:
     - url: https://radiomv.ru/
       name: Radio Police Wave
-    - url: https://www.svetlovka.ru
+    - url: https://www.svetlovka.ru/
       name: Central City Youth Library "Svetlovka"
     - url: http://www.playback.ru/
       name: PlayBack
+    - url: https://dombulgakova.ru/
+      name: DomBulgakova
 logging:
   level:
     root: info

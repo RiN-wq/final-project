@@ -25,4 +25,6 @@ public class LemmaModel {
     private String lemma;
     @Column(columnDefinition = "INT NOT NULL")
     private int frequency;
+    @Version
+    private Long version;
 }

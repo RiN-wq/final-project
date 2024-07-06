@@ -26,7 +26,7 @@ public class LemmaUtilImpl implements LemmaUtil {
     private final IndexRepository indexRepository;
     private final ModelProcessingUtil modelProcessingUtil;
 
-    List<String> russianOfficialPartsOfSpeech = List.of("МЕЖД", "ПРЕДЛ", "СОЮЗ");
+    List<String> russianOfficialPartsOfSpeech = List.of("МЕЖД", "МЕЖД разг", "ПРЕДЛ", "СОЮЗ", "ЧАСТ");
     List<String> englishOfficialPartsOfSpeech = List.of("CONJ", "PREP", "PART", "INT");
 
     @Autowired

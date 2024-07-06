@@ -9,7 +9,6 @@ import searchengine.models.SiteModel;
 import java.util.List;
 
 @Repository
-@Transactional
 public interface PageRepository extends JpaRepository<PageModel, Integer> {
     List<PageModel> findAllBySiteModel(SiteModel siteModel);
     PageModel findByPath(String path);
